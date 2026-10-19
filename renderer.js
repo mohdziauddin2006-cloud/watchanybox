@@ -50,6 +50,12 @@
   } catch (e) { store = { key: '', lang: 'en-US' }; }
   var state = { section: 'home', sub: 'jav', current: null, hls: null, next: null, subs: null, audioPicked: false, naturalEnd: false, failed: new Map(), cfDead: new Set(), embedStuck: null, cfChk: null, liveFilter: '', series: null };
 
+  /* One explicit grace period for every source watchdog. A provider that is
+     still buffering must not be silently replaced; only a real fatal media
+     error is allowed to rotate a live player before this window expires. */
+  var SOURCE_GRACE_MS = 45000;
+  function sourceGrace(ms) { return Math.max(SOURCE_GRACE_MS, Number(ms) || 0); }
+
   /* Cloudflare challenge log, fed by main.js webRequest sniffing: an embed
      that answers with a challenge (403/503 + cf-mitigated, or a turnstile
      challenge-platform frame) lands here so the provider is dropped
@@ -1522,13 +1528,28 @@
     state.subs = (opts.subs && opts.subs.length) ? opts.subs : null;
     state.audioPicked = false;
     state.naturalEnd = false;
-    var dead = false, wd = null;
-    var fail = function () {
+    var dead = false, wd = null, started = false;
+    /* Frames successfully rendered (or a buffer at readyState >= 2) are a
+       hard "do not rotate" signal. This survives buffering stalls: once a
+       viewer has seen the stream, a watchdog may never replace it. */
+    var markStarted = function () {
+      if (v.readyState >= 2 || (!v.paused && v.currentTime > 0.2)) started = true;
+    };
+    v.addEventListener('playing', markStarted);
+    v.addEventListener('loadeddata', markStarted);
+    v.addEventListener('timeupdate', markStarted);
+    var mediaHealthy = function () {
+      return started || v.readyState >= 2 || (!v.paused && v.currentTime > 0.2);
+    };
+    var fail = function (fatal) {
       if (dead) return;
-      dead = true;
-      clearTimeout(wd);
       /* A newer session owns the player: this chain is a zombie. */
       if (ep !== playEpoch) return;
+      /* Only a genuine fatal media error may interrupt a stream that already
+         produced frames. Timeouts/watchdogs stay inert while healthy. */
+      if (!fatal && mediaHealthy()) return;
+      dead = true;
+      clearTimeout(wd);
       /* Natural end-of-stream: a late fatal (VOD playlist end, final-fragment
          append error) must NEVER trigger a silent re-extract, an auto reload
          or an "unavailable" screen. The finished session simply stays put -
@@ -1537,14 +1558,20 @@
       /* A slow/blocked upstream gets ONE silent retry through the local
          twin before the user ever sees an error. Expiring signed streams
          (Eporner...) get ONE silent re-extract via opts.onFail instead. */
-      if (opts.fallback) { var f2 = opts.fallback; var on2 = opts.onFail; opts.fallback = ''; opts.onFail = null; playStream(f2, title, { watchdog: 20000, onFail: on2 }); return; }
+      if (opts.fallback) { var f2 = opts.fallback; var on2 = opts.onFail; opts.fallback = ''; opts.onFail = null; playStream(f2, title, { watchdog: 45000, onFail: on2 }); return; }
       if (opts.onFail) { var fn = opts.onFail; opts.onFail = null; try { fn(); } catch (e) {} return; }
       showUnavailable(title || $('#pTitle').textContent, { retry: function () { playStream(url, title, opts); } });
     };
     if (hls && window.Hls && window.Hls.isSupported()) {
-      var h = new window.Hls({ maxBufferLength: 30, manifestLoadingTimeOut: 14000, enableWorker: false });
+      var h = new window.Hls({
+        maxBufferLength: 60,
+        manifestLoadingTimeOut: 45000,
+        levelLoadingTimeOut: 45000,
+        fragLoadingTimeOut: 45000,
+        enableWorker: false
+      });
       state.hls = h;
-      h.on(window.Hls.Events.ERROR, function (_ev, data) { if (data && data.fatal) fail(); });
+      h.on(window.Hls.Events.ERROR, function (_ev, data) { if (data && data.fatal) fail(true); });
       /* Levels / renditions only exist after the manifest: refresh the
          settings menu, then force the Hindi -> English -> original
          language priority onto the audio rendition. */
@@ -1554,7 +1581,7 @@
       h.loadSource(url); h.attachMedia(v);
       v.play().catch(function () {});
     } else {
-      v.onerror = fail;
+      v.onerror = function () { fail(true); };
       v.src = url;
       v.play().catch(function () {});
     }
@@ -1573,17 +1600,15 @@
       });
     } catch (e) {}
     syncVideoUI();
-    /* Nothing buffered in time: a dead CDN must not leave a dead-end spinner
-       (7s when a twin exists, otherwise a generous last chance). */
+    /* Dead-source watchdog with a strict state guard: 45s minimum, and it
+       never fires once a frame/buffer exists. A buffering player is healthy. */
     wd = setTimeout(function () {
       if (dead) return;
       if (ep !== playEpoch) return;
-      if (v.readyState >= 2) return;
-      fail();
-      /* Standard sections give every stream server a fast 30s ceiling to
-         answer before the player rotates or surfaces the error card. The 18+
-         vault keeps its original ladder exactly as it was. */
-    }, state.section === 'adult' ? (opts.watchdog || (opts.fallback ? 7000 : 28000)) : 30000);
+      if (mediaHealthy()) return;
+      if (v.networkState === v.NETWORK_NO_SOURCE) { fail(true); return; }
+      fail(false);
+    }, sourceGrace(opts.watchdog || 45000));
   }
 
   var embedTimer = null;
@@ -1598,8 +1623,12 @@
     f.classList.remove('hidden');
     f.src = url;
     clearTimeout(embedTimer);
-    var stuck = function () {
+    embedTimer = null;
+    embMediaT = 0;
+    var loaded = false;
+    var rotate = function () {
       clearTimeout(embedTimer);
+      embedTimer = null;
       clearTimeout(state.stallT);
       state.stallT = null;
       clearInterval(state.cfChk);
@@ -1612,9 +1641,33 @@
         page: opts.page || url
       });
     };
+    /* Cross-origin frames cannot be inspected, but their ENHANCER posts a
+       __zaiMedia heartbeat. A heartbeat, a same-origin <video> with a frame,
+       or a loaded YouTube embed all mean "do not rotate". */
+    var mediaHealthy = function () {
+      if (embMediaT && Date.now() - embMediaT < 15000) return true;
+      if (loaded && /youtube(?:-nocookie)?\.com|youtu\.be/i.test(url)) return true;
+      try {
+        var d = f.contentDocument;
+        if (d) {
+          var v = d.querySelector('video');
+          if (v && ((!v.paused && v.currentTime > 0.2) || v.readyState >= 2)) return true;
+        }
+      } catch (e) {}
+      return false;
+    };
+    /* Watchdog only rotates a shell that has never produced media. While
+       media is healthy it re-arms itself silently, so buffering or a long
+       movie is never mistaken for a dead source. */
+    var watchdog = function () {
+      embedTimer = null;
+      if (ep !== playEpoch || !state.embedStuck) return;
+      if (mediaHealthy()) { embedTimer = setTimeout(watchdog, 5000); return; }
+      rotate();
+    };
     /* The frame itself, or its in-page ENHANCER, may later report the media
        is missing ("We couldnt find that") - keep the hook live after load. */
-    state.embedStuck = stuck;
+    state.embedStuck = rotate;
     /* Challenge watchdog: the moment this frame (or a turnstile running
        inside it) starts a Cloudflare verification, swap providers - the
        verification screen must never be what the user sees. */
@@ -1626,25 +1679,24 @@
       if (ep !== playEpoch) return;
       if (!cfHit(cfUrl, cfT0)) return;
       clearInterval(state.cfChk); state.cfChk = null;
+      if (mediaHealthy()) return;
       state.embedStuck = null;
       if (typeof opts.onCf === 'function') { opts.onCf(); return; }
-      stuck();
+      rotate();
     }, 1200);
-    f.onload = function () { if (ep !== playEpoch || fe !== frameEpoch) return; clearTimeout(embedTimer); clearMsg(); nudgePlay(f, fe); };
-    embedTimer = setTimeout(stuck, opts.watchdog || 12000);
+    f.onload = function () { if (ep !== playEpoch || fe !== frameEpoch) return; loaded = true; clearMsg(); nudgePlay(f, fe); };
+    embedTimer = setTimeout(watchdog, sourceGrace(opts.watchdog || 45000));
     /* Stall swap: a mounted page that never reports any media (and never says
-       it is dead) is a broken shell - rotate to the next provider instead of
-       showing the user a silent gray box. */
+       it is dead) is a broken shell - rotate only after the 45s grace. */
     clearTimeout(state.stallT);
     state.stallT = null;
     if (opts.stallSwap) {
-      state.stallT = setTimeout(function () {
+      state.stallT = setTimeout(function tick() {
         state.stallT = null;
-        if (!state.embedStuck) return;
-        if (Date.now() - embMediaT < 6000) return;
-        state.embedStuck = null;
-        stuck();
-      }, opts.stallSwap);
+        if (!state.embedStuck || ep !== playEpoch) return;
+        if (mediaHealthy()) { state.stallT = setTimeout(tick, 5000); return; }
+        rotate();
+      }, sourceGrace(opts.stallSwap));
     }
   }
 
@@ -1843,7 +1895,7 @@
     };
     var launch = function (item) {
       active++;
-      SC.extract(item.x.url, c.title, 30000).then(function (ex) {
+      SC.extract(item.x.url, c.title, 45000).then(function (ex) {
         active--;
         if (ep !== playEpoch || settled) return;
         /* A provider that challenged this host once is never revisited. */
@@ -2077,7 +2129,7 @@
        ladder moves on; the 18+ vault keeps its original extraction cap. */
     var adult = state.section === 'adult';
     var ex = null;
-    try { ex = await SC.extract(it.page || it.url, it.t, adult ? 13000 : 30000); } catch (e) { ex = null; }
+    try { ex = await SC.extract(it.page || it.url, it.t, 45000); } catch (e) { ex = null; }
     if (ep !== playEpoch) return;
     /* Expiring signed URLs (Eporner) may fail minutes after extraction -
        a single silent re-extract hands the player a fresh signature. */

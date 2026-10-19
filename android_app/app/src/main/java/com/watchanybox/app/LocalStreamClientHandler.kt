@@ -69,7 +69,9 @@ class LocalStreamClientHandler(
                 if (asset != null) {
                     val bytes = readAsset(asset)
                     if (bytes != null) {
-                        write(output, 200, mimeOf(asset), bytes, headOnly)
+                        /* Bundled JS/CSS/HTML is immutable for this build:
+                           let the WebView HTTP cache keep it across visits. */
+                        write(output, 200, mimeOf(asset), bytes, headOnly, "public, max-age=86400")
                         return
                     }
                 }
@@ -192,12 +194,19 @@ class LocalStreamClientHandler(
         else -> "application/octet-stream"
     }
 
-    private fun write(output: BufferedOutputStream, status: Int, cType: String, body: ByteArray, headOnly: Boolean) {
+    private fun write(
+        output: BufferedOutputStream,
+        status: Int,
+        cType: String,
+        body: ByteArray,
+        headOnly: Boolean,
+        cacheControl: String = "no-store"
+    ) {
         val header = buildString {
             append("HTTP/1.1 ").append(status).append(statusText(status)).append("\r\n")
             append("Content-Type: ").append(cType).append("\r\n")
             append("Content-Length: ").append(body.size).append("\r\n")
-            append("Cache-Control: no-store\r\n")
+            append("Cache-Control: ").append(cacheControl).append("\r\n")
             append("Access-Control-Allow-Origin: *\r\n")
             append("Connection: close\r\n\r\n")
         }

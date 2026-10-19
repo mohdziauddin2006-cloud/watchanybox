@@ -1,3 +1,8 @@
+/* Provider CDNs frequently use expired / self-signed / incomplete-chain
+   certificates. Disable strict TLS verification for the Node side BEFORE any
+   module (including srv2.js) can open a socket. */
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 /* main.js - WatchAnyBox clean build (Electron main process)
    ----------------------------------------------------------------------------
    1. Static UI server on 127.0.0.1:46900 (skips the proxy range on EADDRINUSE).
@@ -330,6 +335,13 @@ app.whenReady().then(function () {
   }
 
   session.defaultSession.setPermissionRequestHandler(function (_wc, _perm, cb) { cb(true); });
+
+  /* Accept any upstream certificate in the app window too: embedded player
+     frames and provider pages with broken/expired chains must render instead
+     of dying with a certificate-verification error. */
+  try {
+    session.defaultSession.setCertificateVerifyProc(function (_req, cb) { cb(0); });
+  } catch (e) {}
 
   /* ONE listener (Electron keeps only the last attached per event). */
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, function (d, cb) {

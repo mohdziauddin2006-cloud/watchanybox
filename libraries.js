@@ -1159,9 +1159,9 @@
     var ctl = new AbortController();
     /* The abort timer must cover the BODY read too: clearing it when the
        response headers arrive left a stalled backend hanging the click for
-       a minute. Every server gets up to 30s to answer or extract a raw
+       a minute. Every server gets up to 45s to answer or extract a raw
        stream before the ladder rotates. */
-    var tm = setTimeout(function () { ctl.abort(); }, Number(ms) > 0 ? Number(ms) : 30000);
+    var tm = setTimeout(function () { ctl.abort(); }, Number(ms) > 0 ? Number(ms) : 45000);
     try {
       var r = await fetch(B + '/extract?url=' + enc(url) + '&title=' + enc(title || ''), { cache: 'no-store', signal: ctl.signal });
       var j = await r.json();

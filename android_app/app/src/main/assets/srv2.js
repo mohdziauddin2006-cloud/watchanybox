@@ -1,3 +1,10 @@
+/* Streaming providers routinely serve from expired / self-signed /
+   incomplete-chain hosts. Node's fetch must accept them or extraction dies
+   with a certificate-verification crash before any bytes are read. This is
+   intentionally the FIRST statement in the file: it has to be set before any
+   TLS socket is created. */
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 // srv2.js - WatchAnyBox local proxy + extractor (ports 46901-46903)
 const http = require('http');
 const { Readable } = require('stream');
@@ -1570,10 +1577,14 @@ async function r34Feed(tags) {
   const wanted = String(tags || 'animated').trim() || 'animated';
   const attempts = [wanted];
   if (wanted.indexOf(' ') > 0) attempts.push(wanted.split(' ')[0]);
-  for (let s = 0; s < srcs.length; s++) {
+  /* Both upstream feeds are requested CONCURRENTLY. The previous sequential
+     source loop waited out a slow/down first host before even trying the
+     second one, which made the 18+ vault feel stuck. Promise.all keeps the
+     same strict dedupe while cutting the worst-case wait in half. */
+  const readSource = async function (src, si) {
     for (let a = 0; a < attempts.length; a++) {
       try {
-        const r = await grab(srcs[s].u + encodeURIComponent(attempts[a]), undefined, undefined, undefined, 12000);
+        const r = await grab(src.u + encodeURIComponent(attempts[a]), undefined, undefined, undefined, 12000);
         if (!r || !r.ok) continue;
         const txt = await r.text();
         if (!txt || txt.trim().charAt(0) === '<') continue;   /* captcha / challenge page */
@@ -1594,12 +1605,17 @@ async function r34Feed(tags) {
           out.push({
             id: String(p.id || ''), file: f,
             preview: /\.(jpe?g|png|gif|webp)(\?|#|$)/i.test(pre) ? pre : '',
-            page: srcs[s].page + (p.id || '')
+            page: src.page + (p.id || '')
           });
         }
-        if (out.length) return { ok: true, source: s ? 'rule34.xxx' : 'xbooru', posts: out };
+        if (out.length) return { ok: true, source: si ? 'rule34.xxx' : 'xbooru', posts: out };
       } catch (e) {}
     }
+    return null;
+  };
+  const results = await Promise.all(srcs.map(function (src, si) { return readSource(src, si); }));
+  for (let i = 0; i < results.length; i++) {
+    if (results[i] && results[i].posts && results[i].posts.length) return results[i];
   }
   return { ok: false, posts: [] };
 }
@@ -1658,6 +1674,38 @@ function setCached(key, status, headers, body) {
   memCache.set(key, { time: Date.now(), status, headers, body });
 }
 
+/* Long-lived catalog cache. The generic cache above is intentionally short
+   (stream responses must expire quickly); catalogue JSON/HTML and adult feeds
+   are safe to keep for 10-15 minutes, so revisiting Home/Movies/Series/Web
+   Series/18+ paints from memory instead of re-scraping upstream. */
+const CATALOG_TTL = 15 * 60 * 1000;
+const CATALOG_PAGE_TTL = 10 * 60 * 1000;
+const catalogCache = new Map();
+function isCatalogPath(path) {
+  return path === '/tmdb' || path.indexOf('/tmdb/') === 0 ||
+    path === '/eps' || path === '/r34' || path === '/page';
+}
+function catalogTtl(path) {
+  return path === '/page' ? CATALOG_PAGE_TTL : CATALOG_TTL;
+}
+function getCatalogCached(key) {
+  const c = catalogCache.get(key);
+  if (!c) return null;
+  if (Date.now() - c.time > c.ttl) { catalogCache.delete(key); return null; }
+  return c;
+}
+function setCatalogCached(key, status, headers, body, ttl) {
+  if (catalogCache.size > 320) {
+    const now = Date.now();
+    for (const [k, v] of catalogCache.entries()) { if (now - v.time > v.ttl) catalogCache.delete(k); }
+    if (catalogCache.size > 320) {
+      let drop = catalogCache.size - 280;
+      for (const k of catalogCache.keys()) { catalogCache.delete(k); if (--drop <= 0) break; }
+    }
+  }
+  catalogCache.set(key, { time: Date.now(), ttl: ttl || CATALOG_TTL, status, headers, body });
+}
+
 async function handle(req, res){
   hdr(res);
   const u = new URL(req.url, 'http://127.0.0.1');
@@ -1683,6 +1731,17 @@ async function handle(req, res){
     return;
   }
   if (path === '/enhance.js'){ res.writeHead(200, {'Content-Type':'text/javascript; charset=utf-8','Cache-Control':'no-cache'}); return res.end(ENHANCER); }
+
+  /* Catalogue cache hit: Home/Movies/Series/Web Series/18+ rows, episode
+     maps and proxied catalogue pages are returned before any upstream
+     request is made. */
+  if (req.method === 'GET' && isCatalogPath(path)) {
+    const hit = getCatalogCached(req.url);
+    if (hit) {
+      res.writeHead(hit.status, Object.assign({}, hit.headers, { 'X-Catalog-Cache': 'HIT' }));
+      return res.end(hit.body);
+    }
+  }
 
   /* Reachability gate: server-side fetch used to test candidate player URLs
      BEFORE Chromium ever touches them. Dead domains, DNS failures and bad
@@ -1754,7 +1813,11 @@ async function handle(req, res){
     if (!id) return res.end('{"ok":false,"seasons":[]}');
     try {
       const v = await tmdbEpisodes(id);
-      return res.end(JSON.stringify(v || { ok: false, seasons: [] }));
+      const body = JSON.stringify(v || { ok: false, seasons: [] });
+      if (v && v.ok !== false) {
+        setCatalogCached(req.url, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, body, CATALOG_TTL);
+      }
+      return res.end(body);
     } catch (e) {
       return res.end('{"ok":false,"seasons":[]}');
     }
@@ -1764,8 +1827,14 @@ async function handle(req, res){
      media URL) - the animated vault rows read this before touching the DOM. */
   if (path === '/r34') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-    try { return res.end(JSON.stringify(await r34Feed(u.searchParams.get('tags') || 'animated'))); }
-    catch (e) { return res.end('{"ok":false,"posts":[]}'); }
+    try {
+      const feed = await r34Feed(u.searchParams.get('tags') || 'animated');
+      const body = JSON.stringify(feed);
+      if (feed && feed.ok && feed.posts && feed.posts.length) {
+        setCatalogCached(req.url, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, body, CATALOG_PAGE_TTL);
+      }
+      return res.end(body);
+    } catch (e) { return res.end('{"ok":false,"posts":[]}'); }
   }
 
   if (req.method === 'GET' && !req.headers.range) {
@@ -1793,8 +1862,12 @@ async function handle(req, res){
       catch (e1) { r = await grab(tgt.href, undefined, undefined, undefined, 7000); }
       const body = Buffer.from(await r.arrayBuffer());
       const cType = r.headers.get('content-type') || 'application/json; charset=utf-8';
-      setCached(req.url, r.status, { 'Content-Type': cType, 'X-Upstream-Status': String(r.status) }, body);
-      res.writeHead(r.status, {'Content-Type': cType, 'X-Upstream-Status': String(r.status)});
+      const hdrs = { 'Content-Type': cType, 'X-Upstream-Status': String(r.status) };
+      setCached(req.url, r.status, hdrs, body);
+      /* Catalogue rows (trending/popular/discover, search pages) live 15
+         minutes; only a real 200 is cached, never a rate-limit/error body. */
+      if (r.status === 200) setCatalogCached(req.url, r.status, hdrs, body, CATALOG_TTL);
+      res.writeHead(r.status, hdrs);
       return res.end(body);
     } catch (e) {
       res.writeHead(502, {'Content-Type':'application/json; charset=utf-8'});
@@ -2243,9 +2316,14 @@ async function handle(req, res){
         return res.end(CF_DEAD_PAGE);
       }
       /* Non-HTML (JSON APIs such as archive.org advancedsearch): pass through
-         untouched so library fetchers can parse it. */
+         untouched so library fetchers can parse it. Catalogue APIs are safe
+         to keep for the long TTL; these are list payloads, not stream URLs. */
       if (!/text\/html|application\/xhtml/i.test(ctype)) {
-        res.writeHead(200, { 'Content-Type': ctype || 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' });
+        const hdrs = { 'Content-Type': ctype || 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' };
+        if (r.status >= 200 && r.status < 300) {
+          setCatalogCached(req.url, 200, hdrs, html, CATALOG_TTL);
+        }
+        res.writeHead(200, hdrs);
         return res.end(html);
       }
       let origin = ''; try { origin = new URL(url).origin + '/'; } catch (e) {}
@@ -2260,7 +2338,13 @@ async function handle(req, res){
       const tag = '<script src="http://127.0.0.1:' + LIVE_PORT + '/enhance.js"></scr' + 'ipt>';
       if (/<\/body>/i.test(html)) html = html.replace(/<\/body>/i, tag + '</body>');
       else html += tag;
-      res.writeHead(200, {'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-cache'});
+      const hdrs = {'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-cache'};
+      /* Never cache hide=1 player pages: their inline tokens can expire.
+         Ordinary catalog/list HTML is safe for 10 minutes. */
+      if (r.status >= 200 && r.status < 300 && u.searchParams.get('hide') !== '1') {
+        setCatalogCached(req.url, 200, hdrs, html, CATALOG_PAGE_TTL);
+      }
+      res.writeHead(200, hdrs);
       return res.end(html);
     }
     const r = await grab(url, pRef || undefined, undefined, pUA || undefined);
@@ -2291,12 +2375,17 @@ function start(i){
     } catch (e) { ALT_OK = false; }
   });
 }
-start(0);
+let START_ERROR = null;
+try { start(0); } catch (e) {
+  START_ERROR = e;
+  try { console.error('[srv2] listener start failed:', e && e.stack ? e.stack : e); } catch (_) {}
+}
 /* Hooks for the local verification harness (main.js ignores the value; a
    plain `true` would hide the internals the tests need to inspect). */
 module.exports = {
   EP_SESS, EP_STUB_RE, findEpisodeLinks, epornerSources, epIsStubResponse,
   epNormPath, epNumOf, epStem, normPageKey,
   findPartLinks, mergeLadders, partNumOfText, folderBase, partsCountOf,
-  LIVE_PORT: function () { return LIVE_PORT; }
+  LIVE_PORT: function () { return LIVE_PORT; },
+  START_ERROR: function () { return START_ERROR; }
 };

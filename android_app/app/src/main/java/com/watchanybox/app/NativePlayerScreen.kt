@@ -1,5 +1,9 @@
 package com.watchanybox.app
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,86 +16,55 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.MediaItem
-import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.hls.HlsMediaSource
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
-import okhttp3.OkHttpClient
-import java.util.concurrent.TimeUnit
 
 /** A stream handed over from the web player to the native surface. */
 data class NativePlay(val url: String, val title: String)
 
 /**
- * Native Media3/ExoPlayer surface. The URL is always the local proxy route
- * (/raw?... or /hls?...) so the embedded engine keeps injecting the right
- * headers upstream. HLS playlists are routed through HlsMediaSource, direct
- * files through ProgressiveMediaSource. Layout is pure aspectRatio + weight.
+ * Native Media3/ExoPlayer surface. The ExoPlayer instance is owned by the app
+ * root (so rotation/layout changes never restart playback); this composable
+ * only attaches a PlayerView to it.
+ *
+ * Inline playback is 16:9 and always uses RESIZE_MODE_FIT, so the frame is
+ * letterboxed rather than cropped or stretched. Fullscreen fills the entire
+ * window; the fullscreen flag is hoisted to the app root as well.
  */
 @Composable
 fun NativePlayerScreen(
+    player: ExoPlayer,
     play: NativePlay,
     compact: Boolean,
+    fullscreen: Boolean,
+    onFullscreenChange: (Boolean) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
+    val view = LocalView.current
 
-    val player = remember(play.url) {
-        val http = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .build()
-        ExoPlayer.Builder(context)
-            .setMediaSourceFactory(
-                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
-                    DefaultDataSource.Factory(context, OkHttpDataSource.Factory(http))
-                )
-            )
-            .build()
+    DisposableEffect(view) {
+        val previous = view.keepScreenOn
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = previous }
     }
-
-    DisposableEffect(player, play.url) {
-        val dataSourceFactory = DefaultDataSource.Factory(
-            context,
-            OkHttpDataSource.Factory(
-                OkHttpClient.Builder()
-                    .connectTimeout(15, TimeUnit.SECONDS)
-                    .readTimeout(30, TimeUnit.SECONDS)
-                    .build()
-            )
-        )
-        val item = MediaItem.fromUri(play.url)
-        val source = if (play.url.contains("/hls?") || play.url.contains(".m3u8")) {
-            HlsMediaSource.Factory(dataSourceFactory).createMediaSource(item)
-        } else {
-            ProgressiveMediaSource.Factory(dataSourceFactory).createMediaSource(item)
-        }
-        player.setMediaSource(source)
-        player.playWhenReady = true
-        player.prepare()
-        onDispose { player.stop() }
-    }
-    DisposableEffect(player) {
-        onDispose { player.release() }
-    }
+    BackHandler(enabled = fullscreen) { onFullscreenChange(false) }
 
     val surface: @Composable (Modifier) -> Unit = { m ->
         AndroidView(
@@ -99,56 +72,94 @@ fun NativePlayerScreen(
                 PlayerView(ctx).apply {
                     this.player = player
                     useController = true
+                    /* FIT: never crop, never stretch. Letterbox the frame. */
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                    setKeepContentOnPlayerReset(true)
+                    setShutterBackgroundColor(android.graphics.Color.BLACK)
                     setBackgroundColor(android.graphics.Color.BLACK)
+                    setFullscreenButtonClickListener { wantsFullscreen ->
+                        onFullscreenChange(wantsFullscreen)
+                    }
                 }
             },
-            modifier = m
+            modifier = m,
+            onRelease = { pv -> pv.player = null }
         )
     }
 
     Box(modifier.background(Color.Black)) {
-        if (compact) {
-            Column(Modifier.fillMaxSize()) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(16f / 9f)
-                        .background(Color.Black)
-                ) { surface(Modifier.fillMaxSize()) }
-                PlayerInfo(play = play, onBack = onBack, modifier = Modifier.weight(1f))
+        when {
+            fullscreen -> {
+                Box(Modifier.fillMaxSize()) {
+                    surface(Modifier.fillMaxSize())
+                    TextButton(
+                        onClick = { onFullscreenChange(false) },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(12.dp)
+                            .background(Color(0xB0000000), RoundedCornerShape(8.dp))
+                    ) { Text("Exit fullscreen", color = Color.White) }
+                }
             }
-        } else {
-            /* Split view on tablets/foldables: player + information pane. */
-            Row(Modifier.fillMaxSize()) {
-                Box(
-                    Modifier
-                        .weight(2f)
-                        .fillMaxHeight()
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
+            compact -> {
+                Column(Modifier.fillMaxSize()) {
                     Box(
                         Modifier
                             .fillMaxWidth()
                             .aspectRatio(16f / 9f)
                             .background(Color.Black)
                     ) { surface(Modifier.fillMaxSize()) }
+                    PlayerInfo(
+                        play = play,
+                        onBack = onBack,
+                        onFullscreen = { onFullscreenChange(true) },
+                        modifier = Modifier.weight(1f)
+                    )
                 }
-                Box(
-                    Modifier
-                        .width(1.dp)
-                        .fillMaxHeight()
-                        .background(MaterialTheme.colorScheme.outline)
-                )
-                PlayerInfo(play = play, onBack = onBack, modifier = Modifier.weight(1f))
+            }
+            else -> {
+                /* Split view on tablets/foldables: player + information pane. */
+                Row(Modifier.fillMaxSize()) {
+                    Box(
+                        Modifier
+                            .weight(2f)
+                            .fillMaxHeight()
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f)
+                                .background(Color.Black)
+                        ) { surface(Modifier.fillMaxSize()) }
+                    }
+                    Box(
+                        Modifier
+                            .width(1.dp)
+                            .fillMaxHeight()
+                            .background(MaterialTheme.colorScheme.outline)
+                    )
+                    PlayerInfo(
+                        play = play,
+                        onBack = onBack,
+                        onFullscreen = { onFullscreenChange(true) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun PlayerInfo(play: NativePlay, onBack: () -> Unit, modifier: Modifier = Modifier) {
+private fun PlayerInfo(
+    play: NativePlay,
+    onBack: () -> Unit,
+    onFullscreen: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Column(modifier.fillMaxHeight().padding(20.dp)) {
         Text(
             "Now playing",
@@ -172,6 +183,17 @@ private fun PlayerInfo(play: NativePlay, onBack: () -> Unit, modifier: Modifier 
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.height(20.dp))
-        Button(onClick = onBack) { Text("Back to catalogue") }
+        Row {
+            Button(onClick = onBack) { Text("Back to catalogue") }
+            Spacer(Modifier.width(12.dp))
+            TextButton(onClick = onFullscreen) { Text("Fullscreen") }
+        }
     }
+}
+
+/** Unwraps the activity from a Compose/local wrapper context. */
+internal tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
