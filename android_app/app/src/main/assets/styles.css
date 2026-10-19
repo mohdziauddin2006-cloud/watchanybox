@@ -1,0 +1,439 @@
+/* styles.css - WatchAnyBox clean build. Dark, quiet, ad-free surface.
+   Custom scrollbars on the main viewing area and every horizontal row. */
+
+:root {
+  --bg: #07070a;
+  --bg2: #0d0d12;
+  --card: #15151c;
+  --line: #22222c;
+  --txt: #e9eef5;
+  --dim: #8b96a5;
+  --dim2: #5b5b6b;
+  --accent: #e50914;
+  --pink: #ec4899;
+  --sb: #2c3440;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--txt);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+}
+
+.hidden { display: none !important; }
+
+/* ---------------- shell ---------------- */
+#shell { display: flex; height: 100vh; }
+
+#sidebar {
+  width: 208px; flex: 0 0 208px;
+  background: var(--bg2);
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  padding: 14px 0 10px;
+}
+
+.brand {
+  padding: 0 18px 14px;
+  font-weight: 800; font-size: 19px; letter-spacing: .3px; color: #fff;
+}
+.brand span { color: var(--pink); }
+
+#nav {
+  flex: 1; display: flex; flex-direction: column; gap: 2px;
+  overflow-y: auto; padding: 0 10px;
+}
+#nav button {
+  appearance: none; border: 0; background: transparent; color: #b9bec9;
+  text-align: left; padding: 9px 12px; border-radius: 9px;
+  font: 600 13.5px/1.2 system-ui; cursor: pointer;
+  transition: background .12s, color .12s;
+}
+#nav button:hover { background: #16161e; color: #fff; }
+#nav button.active { background: #1d1d27; color: #fff; box-shadow: inset 2px 0 0 var(--pink); }
+#nav .gap { flex: 0 0 10px; }
+
+#nav::-webkit-scrollbar { width: 8px; }
+#nav::-webkit-scrollbar-thumb { background: var(--sb); border-radius: 8px; }
+
+.settings {
+  margin: 10px 12px 0; padding: 9px 12px;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: #13131a; color: #cfd5df; font: 600 13px system-ui; cursor: pointer;
+}
+.settings:hover { background: #1a1a24; color: #fff; }
+
+#main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+#topbar {
+  padding: 12px 18px; border-bottom: 1px solid var(--line);
+  background: rgba(9,9,13,.9); backdrop-filter: blur(6px);
+}
+#searchForm { display: flex; gap: 10px; max-width: 640px; }
+#searchInput {
+  flex: 1; padding: 10px 14px; border-radius: 10px;
+  border: 1px solid var(--line); background: #101018; color: #fff;
+  font: 14px system-ui; outline: none;
+}
+#searchInput:focus { border-color: #3a3a4c; }
+.primary {
+  padding: 10px 18px; border: 0; border-radius: 10px;
+  background: var(--accent); color: #fff; font: 700 13.5px system-ui; cursor: pointer;
+}
+.primary:hover { filter: brightness(1.1); }
+
+/* ---------------- content + THE custom scrollbar ---------------- */
+#content {
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+  padding: 16px 0 60px;
+}
+#content::-webkit-scrollbar { width: 10px; }
+#content::-webkit-scrollbar-track { background: rgba(255,255,255,.03); }
+#content::-webkit-scrollbar-thumb { background: var(--pink); border-radius: 10px; border: 2px solid var(--bg); }
+#content::-webkit-scrollbar-thumb:hover { background: #f472b6; }
+
+.row { margin: 0 0 22px; }
+.row h3 {
+  margin: 0 0 9px; padding: 0 18px;
+  font: 700 15px/1.2 system-ui; color: var(--txt);
+}
+.row .sub { padding: 0 18px; margin: -5px 0 9px; font: 11px monospace; color: var(--dim2); }
+.row-scroll {
+  display: flex; gap: 12px; overflow-x: auto; overflow-y: hidden;
+  padding: 2px 18px 12px;
+  scrollbar-width: thin; scrollbar-color: var(--sb) rgba(255,255,255,.04);
+}
+.row-scroll::-webkit-scrollbar { height: 9px; }
+.row-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,.04); border-radius: 8px; }
+.row-scroll::-webkit-scrollbar-thumb { background: var(--sb); border-radius: 8px; }
+.row-scroll::-webkit-scrollbar-thumb:hover { background: #3a4454; }
+
+.empty { color: var(--dim2); font: 12.5px system-ui; padding: 4px 2px; }
+.err { color: #f66; font: 12.5px system-ui; padding: 4px 2px; }
+
+/* ---------------- cards ---------------- */
+.card {
+  flex: 0 0 152px; width: 152px; cursor: pointer; position: relative;
+  transition: transform .13s ease;
+}
+.card:hover { transform: translateY(-3px); }
+.card .poster-wrap {
+  width: 152px; height: 214px; border-radius: 10px; overflow: hidden;
+  background: var(--card); position: relative;
+}
+.card .poster { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card .badge {
+  position: absolute; top: 6px; right: 6px;
+  background: rgba(0,0,0,.78); color: #fff;
+  font: 600 10px system-ui; padding: 2px 6px; border-radius: 4px;
+}
+.card .srctag {
+  position: absolute; top: 6px; left: 6px;
+  background: rgba(0,0,0,.78); color: #9dd; 
+  font: 600 10px monospace; padding: 2px 6px; border-radius: 4px;
+}
+.card .meta { margin-top: 6px; }
+.card .meta .t {
+  font: 500 12px/1.3 system-ui; color: #cfd8e3;
+  max-height: 32px; overflow: hidden;
+}
+.card .meta .s { font: 11px system-ui; color: var(--dim2); margin-top: 2px; }
+
+/* wide (landscape) variant for scraped / live rows */
+.card.wide { flex: 0 0 186px; width: 186px; }
+.card.wide .poster-wrap { width: 186px; height: 105px; }
+.card .dur {
+  position: absolute; right: 6px; bottom: 6px;
+  background: rgba(0,0,0,.78); color: #fff;
+  font: 11px monospace; padding: 1px 5px; border-radius: 4px;
+}
+
+/* ---------------- player ---------------- */
+.player {
+  position: fixed; inset: 0; z-index: 900;
+  isolation: isolate;
+  background: #000; display: flex; flex-direction: column;
+}
+/* Top bar and bottom controls are two separate overlay layers OUTSIDE the
+   media stage. Both own the ABSOLUTE maximum z-index (2147483647) and
+   explicitly accept pointer events, so a video element, an iframe or any
+   transparent page layer inside .pframe can never intercept their clicks. */
+.pbar {
+  position: relative; z-index: 2147483647 !important;
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; background: #0b0b10; border-bottom: 1px solid var(--line);
+  pointer-events: auto !important;
+}
+.pbar * { pointer-events: auto !important; }
+.pbar button { pointer-events: auto !important; }
+.pbar .ghost {
+  padding: 7px 13px; border: 1px solid var(--line); border-radius: 8px;
+  background: #15151c; color: #ddd; font: 600 12.5px system-ui; cursor: pointer;
+}
+.pbar .ghost:hover { background: #1d1d27; color: #fff; }
+.ptitle {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 600 13.5px system-ui; color: #e9eef5;
+}
+.pchip {
+  background: #1c2f22; color: #4ade80; border: 1px solid #2c4a35;
+  font: 700 10px monospace; letter-spacing: .6px;
+  padding: 3px 8px; border-radius: 999px;
+}
+/* Season / Episode selectors (series playback): compact, always visible on
+   top of the top bar, and pinned to the ABSOLUTE maximum z-index with
+   explicit pointer events - a video element, an embedded iframe or any
+   transparent page layer beneath them can never swallow their clicks. */
+.psel {
+  flex: 0 0 auto; max-width: 150px; height: 32px; padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, .18); border-radius: 8px;
+  background: #15151c; color: #fff; font: 600 12px system-ui; cursor: pointer;
+  pointer-events: auto !important; position: relative;
+  z-index: 2147483647 !important;
+}
+.psel:hover { background: #1d1d27; }
+.psel.hidden { display: none !important; }
+/* "Episodes" caption that sits with the Season/Episode selectors: it labels
+   the ladder controls on every episodic surface, pinned to the same absolute
+   top z-index and explicitly clickable/visible above any media layer. */
+.peplbl {
+  flex: 0 0 auto; padding: 3px 8px; border-radius: 999px;
+  background: #16161f; border: 1px solid rgba(255, 255, 255, .14);
+  color: #b9c2cf; font: 700 10px system-ui; letter-spacing: .7px;
+  text-transform: uppercase; white-space: nowrap;
+  pointer-events: auto !important; position: relative;
+  z-index: 2147483647 !important;
+}
+.peplbl.hidden { display: none !important; }
+/* Prev/Next episode buttons carry their episode number: the same absolute
+   z-index rule as every other control-bar widget, so a video or iframe can
+   never sit above them. */
+.pcontrols #pPrev, .pcontrols #pNext {
+  position: relative; z-index: 2147483647 !important;
+  pointer-events: auto !important;
+}
+.pframe { flex: 1; min-height: 0; position: relative; z-index: 1 !important; overflow: hidden; background: #000; }
+/* The ACTIVE media surface always owns its pixels: video and iframe both
+   accept pointer events with !important, so hovers, drags and clicks (e.g.
+   an embedded provider's own bottom control bar) are never swallowed by an
+   app layer. */
+.pframe video {
+  position: relative; z-index: 0 !important;
+  width: 100%; height: 100%; background: #000; object-fit: contain; display: block;
+  pointer-events: auto !important;
+}
+.pframe iframe {
+  position: relative; z-index: 0 !important;
+  width: 100%; height: 100%; border: 0; background: #000; display: block;
+  pointer-events: auto !important;
+}
+#pVideo::-webkit-media-controls { display: none !important; }
+.pmsg {
+  position: absolute; inset: 0; z-index: 90000; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 14px;
+  background: rgba(4,4,8,.96); color: #cfd5df; text-align: center; padding: 30px;
+  pointer-events: auto;
+}
+/* A dismissed message layer is GONE (display:none), not an invisible
+   transparent shield sitting over the media surface. */
+.pmsg.hidden { display: none !important; pointer-events: none !important; }
+.pmsg h2 { margin: 0; font: 700 19px system-ui; color: #fff; }
+.pmsg p { margin: 0; color: var(--dim); font-size: 13.5px; max-width: 420px; line-height: 1.5; }
+.pmsg .row2 { display: flex; gap: 10px; }
+.pmsg button {
+  padding: 9px 18px; border-radius: 9px; cursor: pointer;
+  border: 1px solid var(--line); background: #17171f; color: #eee;
+  font: 600 13px system-ui;
+}
+.pmsg button.primary { border: 0; background: var(--accent); font-weight: 700; }
+
+/* Bottom player controls: an overlay layer with the absolute maximum
+   z-index, sibling of .pframe (never a child), so no media element or
+   embedded player inside the stage shares its stacking context. Only the
+   actual widgets (buttons, seek/volume inputs, popover) accept pointer
+   events - the transparent gradient strip between them deliberately lets
+   clicks pass through instead of acting as a full-width click shield. */
+.pcontrols {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2147483647 !important;
+  display: flex; align-items: center; gap: 10px;
+  padding: 26px 14px 12px;
+  background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.9) 42%);
+  pointer-events: none !important;
+}
+.pcontrols * { pointer-events: auto !important; }
+.pcontrols.hidden { display: none !important; pointer-events: none !important; }
+.pcontrols .pctl {
+  flex: 0 0 auto; min-width: 38px; height: 34px; padding: 0 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(255,255,255,.18); border-radius: 8px;
+  background: rgba(14,14,20,.88); color: #fff;
+  font: 700 13px system-ui; cursor: pointer;
+  pointer-events: auto !important;
+}
+.pcontrols .pctl:hover { background: #1d1d27; border-color: rgba(255,255,255,.3); }
+.pcontrols .ptime {
+  flex: 0 0 auto; color: #e9eef5; white-space: nowrap;
+  font: 600 11.5px ui-monospace, "Cascadia Mono", monospace;
+}
+.pcontrols .pseek {
+  flex: 1 1 auto; min-width: 80px; cursor: pointer;
+  accent-color: var(--accent); pointer-events: auto !important;
+}
+.pcontrols .pvol {
+  flex: 0 0 92px; width: 92px; cursor: pointer;
+  accent-color: var(--pink); pointer-events: auto !important;
+}
+/* An engaged toggle (subtitles showing, ...) reads as pressed. */
+.pcontrols .pctl.on {
+  background: var(--accent); border-color: transparent; color: #101018;
+}
+/* Settings popover: quality levels + playback speed. Sits above the bar,
+   inside the bar's own top-most stacking context so nothing can cover it. */
+.pmenu {
+  position: absolute; right: 12px; bottom: calc(100% + 12px);
+  min-width: 176px; max-height: 62vh; overflow: auto;
+  padding: 8px; border-radius: 11px; z-index: 2147483647 !important;
+  background: rgba(10, 10, 15, .97); border: 1px solid rgba(255, 255, 255, .14);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .55); pointer-events: auto !important;
+}
+.pmenu.hidden { display: none !important; }
+.pmenu .mt {
+  padding: 6px 9px 4px; color: var(--dim);
+  font: 700 10px system-ui; letter-spacing: .8px; text-transform: uppercase;
+}
+.pmenu .mi {
+  display: block; width: 100%; text-align: left; padding: 8px 10px; margin: 1px 0;
+  border: 0; border-radius: 7px; background: transparent; color: #e9eef5;
+  font: 600 12.5px system-ui; cursor: pointer; pointer-events: auto !important;
+}
+.pmenu .mi:hover { background: #1d1d27; }
+.pmenu .mi.sel { background: var(--accent); color: #101018; font-weight: 700; }
+/* Every interactive element inside the top bar, the bottom control bar and
+   the settings popover: explicitly clickable, pointer cursor, and pinned to
+   the absolute top of its stacking context - a transparent video element,
+   iframe or page layer can never swallow their clicks. */
+.pbar button, .pbar input, .pbar select,
+.pcontrols button, .pcontrols input, .pcontrols select,
+.pmenu button {
+  pointer-events: auto !important; cursor: pointer !important;
+  position: relative; z-index: 2147483647 !important;
+}
+@media (max-width: 720px) {
+  .pcontrols .ptime { display: none; }
+  .pcontrols .pvol { flex-basis: 66px; width: 66px; }
+}
+.spin {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid #2a2a35; border-top-color: var(--pink);
+  animation: sp .8s linear infinite;
+}
+@keyframes sp { to { transform: rotate(360deg); } }
+
+/* ---------------- modal ---------------- */
+.modal {
+  position: fixed; inset: 0; z-index: 950;
+  background: rgba(0,0,0,.72);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal .box {
+  width: min(560px, 92vw); max-height: 86vh; overflow-y: auto;
+  background: #101018; border: 1px solid var(--line); border-radius: 16px;
+  padding: 22px 24px;
+  scrollbar-width: thin; scrollbar-color: var(--sb) transparent;
+}
+.modal .box::-webkit-scrollbar { width: 8px; }
+.modal .box::-webkit-scrollbar-thumb { background: var(--sb); border-radius: 8px; }
+.modal .box h3 { margin: 0 0 14px; font: 800 17px system-ui; color: #fff; }
+.field { display: block; margin: 0 0 14px; font: 600 12.5px system-ui; color: var(--dim); }
+.field input, .field select {
+  width: 100%; margin-top: 6px; padding: 10px 12px;
+  border-radius: 9px; border: 1px solid var(--line);
+  background: #0c0c13; color: #fff; font: 13.5px system-ui; outline: none;
+}
+.boxactions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+.boxactions .ghost {
+  padding: 9px 16px; border: 1px solid var(--line); border-radius: 9px;
+  background: #15151c; color: #ddd; font: 600 13px system-ui; cursor: pointer;
+}
+
+/* ---------------- detail view ---------------- */
+.detail .hero {
+  min-height: 240px; background: #0d0d13 center/cover no-repeat;
+  position: relative; border-radius: 0;
+}
+.detail .hero-in {
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, rgba(7,7,10,.96) 20%, rgba(7,7,10,.55) 70%, rgba(7,7,10,.2));
+  padding: 24px 26px; display: flex; flex-direction: column; justify-content: flex-end;
+}
+.detail h1 { margin: 0 0 6px; font: 800 26px/1.15 system-ui; color: #fff; max-width: 640px; }
+.detail .sub { color: var(--dim); font: 13px system-ui; margin-bottom: 8px; }
+.detail p { color: #b9c2cd; font-size: 13.5px; line-height: 1.55; max-width: 720px; margin: 0 0 14px; }
+.detail .btns { display: flex; gap: 10px; flex-wrap: wrap; }
+.detail .btns .ghost {
+  padding: 10px 18px; border: 1px solid var(--line); border-radius: 10px;
+  background: #15151c; color: #e5e5ec; font: 600 13px system-ui; cursor: pointer;
+}
+.detail .section { padding: 16px 26px 40px; }
+.detail .section h3 { margin: 0 0 10px; font: 700 15px system-ui; color: #fff; }
+.epgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.epgrid button {
+  padding: 9px 10px; border-radius: 9px; border: 1px solid var(--line);
+  background: #14141c; color: #dfe5ee; font: 600 12.5px system-ui; cursor: pointer;
+  text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.epgrid button:hover { background: #1c1c27; }
+select.picker {
+  margin: 0 0 12px; padding: 9px 12px; border-radius: 9px;
+  border: 1px solid var(--line); background: #0c0c13; color: #fff; font: 13px system-ui;
+}
+
+/* ---------------- toast ---------------- */
+.toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+  z-index: 990; background: #17171f; color: #eef2f7;
+  border: 1px solid #2c2c3a; border-radius: 10px;
+  padding: 10px 18px; font: 600 13px system-ui;
+  box-shadow: 0 10px 34px rgba(0,0,0,.6);
+  animation: tin .18s ease;
+}
+@keyframes tin { from { opacity: 0; transform: translate(-50%, 8px); } }
+
+/* ---------------- live tv grid ---------------- */
+.livegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; padding: 0 18px 20px; }
+.livegrid .ch { cursor: pointer; }
+.livegrid .ch .logo {
+  height: 86px; border-radius: 9px; background: #15151c;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.livegrid .ch img { max-width: 82%; max-height: 76%; object-fit: contain; }
+.livegrid .ch .nm { margin-top: 6px; font: 600 12px/1.3 system-ui; color: #cfd8e3; max-height: 32px; overflow: hidden; }
+
+/* ---------------- per-tab search strip + 18+ sub-nav ---------------- */
+.sstrip { padding: 2px 18px 14px; }
+.sstrip .sform { display: flex; gap: 10px; max-width: 560px; }
+.sinput {
+  flex: 1; padding: 9px 14px; border-radius: 10px;
+  border: 1px solid var(--line); background: #101018; color: #fff;
+  font: 13.5px system-ui; outline: none;
+}
+.sinput:focus { border-color: #3a3a4c; }
+.subnav { display: flex; gap: 8px; flex-wrap: wrap; padding: 2px 18px 12px; }
+.subnav .chip {
+  appearance: none; cursor: pointer;
+  padding: 8px 14px; border-radius: 999px;
+  border: 1px solid var(--line); background: #13131a; color: #c6cdd8;
+  font: 600 12.5px system-ui;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.subnav .chip:hover { background: #1a1a24; color: #fff; }
+.subnav .chip.active { background: var(--pink); border-color: var(--pink); color: #fff; }
+.searchhead { padding: 2px 18px 12px; }
+.searchhead h3 { margin: 0; font: 700 16px system-ui; color: var(--txt); }
+.searchhead .sub { margin: 4px 0 0; font: 11.5px system-ui; color: var(--dim2); }

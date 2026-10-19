@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Watch AnyBox</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-sec="home">
+
+<div id="shell">
+  <aside id="sidebar">
+    <div class="brand">Watch<span>AnyBox</span></div>
+    <nav id="nav">
+      <button data-sec="home" class="active">Home</button>
+      <button data-sec="movie">Movies</button>
+      <button data-sec="tv">Series</button>
+      <button data-sec="webseries">Web Series</button>
+      <button data-sec="kdrama">K-Drama</button>
+      <button data-sec="anime">Anime</button>
+      <button data-sec="kids">Kids</button>
+      <button data-sec="adult">18+</button>
+      <button data-sec="cartoons">Cartoons</button>
+      <button data-sec="livetv">Live TV</button>
+      <button data-sec="tube">Tube</button>
+    </nav>
+    <button id="settingsBtn" class="settings">Settings</button>
+  </aside>
+
+  <section id="main">
+    <header id="topbar">
+      <form id="searchForm" autocomplete="off">
+        <input id="searchInput" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search anything - Super Search on Home" />
+        <button class="primary" type="submit">Search</button>
+      </form>
+    </header>
+    <div id="content"></div>
+  </section>
+</div>
+
+<!-- PLAYER - clean surface only: title bar, media stage, status text and a
+     dedicated bottom control layer. There is deliberately NO server selector,
+     NO scanner readout, NO counters. -->
+<div id="playerView" class="player hidden">
+  <div class="pbar">
+    <button id="pClose" class="ghost">&#8592; Back</button>
+    <div id="pTitle" class="ptitle"></div>
+    <span id="pEpLbl" class="peplbl hidden" aria-hidden="true">Episodes</span>
+    <select id="pSeason" class="psel hidden" aria-label="Season" title="Season"></select>
+    <select id="pEp" class="psel hidden" aria-label="Episode" title="Episode"></select>
+    <span id="pChip" class="pchip hidden"></span>
+    <button id="pFull" class="ghost">Fullscreen</button>
+  </div>
+  <div class="pframe" id="pStage">
+    <video id="pVideo" class="hidden" autoplay playsinline></video>
+    <iframe id="pFrame" class="hidden" allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *; clipboard-write *" allowfullscreen></iframe>
+    <div id="pMsg" class="pmsg hidden"></div>
+  </div>
+  <!-- The control bar is a SIBLING of the media stage, not a child: no video,
+       iframe, poster or transparent page layer can ever sit above it in the
+       same stacking context and swallow the clicks. -->
+  <div id="pControls" class="pcontrols hidden">
+    <button id="pPlay" class="pctl" type="button" aria-label="Play">&#9654;</button>
+    <button id="pBack10" class="pctl" type="button" aria-label="Rewind 10 seconds">-10s</button>
+    <button id="pFwd10" class="pctl" type="button" aria-label="Forward 10 seconds">+10s</button>
+    <button id="pPrev" class="pctl hidden" type="button" aria-label="Previous episode">&#9198; Ep</button>
+    <button id="pNext" class="pctl hidden" type="button" aria-label="Next episode">Ep &#9197;</button>
+    <span id="pTime" class="ptime">0:00 / 0:00</span>
+    <input id="pSeek" class="pseek" type="range" min="0" max="1" step="0.1" value="0" aria-label="Seek" />
+    <button id="pMute" class="pctl" type="button" aria-label="Mute">&#128266;</button>
+    <input id="pVol" class="pvol" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" />
+    <button id="pCC" class="pctl hidden" type="button" aria-label="Subtitles">CC</button>
+    <button id="pAudio" class="pctl hidden" type="button" aria-label="Audio track">1</button>
+    <button id="pSet" class="pctl" type="button" aria-label="Quality and speed">&#9881;</button>
+    <button id="pFs" class="pctl" type="button" aria-label="Fullscreen">&#9974;</button>
+    <div id="pMenu" class="pmenu hidden"></div>
+  </div>
+</div>
+
+<div id="settingsModal" class="modal hidden">
+  <div class="box">
+    <h3>Settings</h3>
+    <label class="field">TMDB API key (optional - a built-in key is used when empty)
+      <input id="setTmdb" type="text" placeholder="32 character key" />
+    </label>
+    <label class="field">Metadata language
+      <select id="setLang"></select>
+    </label>
+    <div class="boxactions">
+      <button id="setClose" class="ghost">Cancel</button>
+      <button id="setSave" class="primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="hls.min.js"></script>
+<script src="sources.js"></script>
+<script src="libraries.js"></script>
+<script src="renderer.js"></script>
+</body>
+</html>

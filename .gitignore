@@ -1,0 +1,21 @@
+# WatchAnyBox - git ignore
+node_modules/
+android_app/node_modules/
+android_app/app/build/
+android_app/build/
+android_app/app/.gradle/
+android_app/.gradle/
+android_app/local.properties
+dist_desktop/
+desktop_stage/
+*.log
+npm-debug.log*
+.DS_Store
+.env
+.idea/
+*.iml
+
+# built binaries travel through GitHub Releases, never through git
+*.apk
+*.zip
+*.exe

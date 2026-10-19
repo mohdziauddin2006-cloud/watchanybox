@@ -1,0 +1,16 @@
+{
+  "name": "watchanybox",
+  "productName": "Watch AnyBox",
+  "version": "3.0.0",
+  "description": "Watch AnyBox - clean native streaming build. Direct local playback, no server UI, no popups.",
+  "main": "main.js",
+  "author": "mohdziauddin2006-cloud",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "hls.js": "^1.7.3"
+  }
+}

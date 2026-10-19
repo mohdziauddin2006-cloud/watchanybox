@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="background">#07070A</color>
+    <color name="surface">#0D0D12</color>
+    <color name="surface_vault">#1A0A1A</color>
+    <color name="on_background">#E9EEF5</color>
+    <color name="on_surface">#CFD8E3</color>
+    <color name="accent">#E50914</color>
+    <color name="accent_vault">#EC4899</color>
+    <color name="dim">#8B96A5</color>
+    <color name="divider">#22222C</color>
+    <color name="player_background">#000000</color>
+</resources>
