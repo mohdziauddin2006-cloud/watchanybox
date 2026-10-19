@@ -10,7 +10,7 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist:win": "electron-builder --win portable --x64"
+    "dist:win": "electron-builder --win nsis --x64"
   },
   "devDependencies": {
     "electron": "^44.7.0",
@@ -46,17 +46,21 @@
       "icon": "build/icon.ico",
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
         }
-      ],
-      "artifactName": "WatchAnyBox.exe"
+      ]
     },
-    "portable": {
-      "requestExecutionLevel": "user",
-      "artifactName": "WatchAnyBox.exe"
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "WatchAnyBox",
+      "artifactName": "WatchAnyBox-Setup-${version}.exe"
     }
   }
 }

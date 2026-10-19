@@ -14,7 +14,7 @@
      the best live one is mounted directly. 429s, timeouts, dead mirrors and
      Cloudflare challenges are caught and skipped without a visible word.
    - Custom library cards (XMaal, KatMovieHD, KDramasMaza, AniMixPlay,
-     Eporner, Rule34, MissAV, Hentaicity, Hentai.tv) route through the local
+     Eporner, Rule34, Hentaicity, Hentai.tv) route through the local
      /extract backend or their own decoder straight into the native player.
    - Failure at every level ends in ONE clean "Stream unavailable" overlay. */
 (function () {
@@ -258,7 +258,7 @@
     if (row.kind === 'ep') return SC.epRow(row);
     if (row.kind === 'r34') return SC.r34Row(row);
     if (row.kind === 'r34v') return SC.r34vRow(row);
-    if (row.kind === 'mv') return SC.mvRow(row);
+    if (row.kind === 'jav') return SC.javRow(row);
     if (row.kind === 'hc') return SC.hcRow(row);
     if (row.kind === 'htv') return SC.htvRow(row);
     if (row.kind === 'ytr') return SC.ytRow(row);
@@ -321,7 +321,7 @@
   /* ---------------- episodes that arrive as a LIST of cards ----------------
      Not every episodic source has a backend ladder: hentai.tv ships one JSON
      item per episode ("Show - Ep 3"), an XMaal season lists its episodes as
-     separate cards, MissAV/JAV parts are separate pages. Those cards make a
+     separate cards, JAV parts are separate pages. Those cards make a
      REAL episode ladder here - grouped by the show's identity (the title with
      its episode tail removed, or the series/ep fields the scraper attached)
      and annotated with the ladder, so the player's Season/Episode selector and
@@ -626,7 +626,12 @@
     if (d.overview) hi.appendChild(el('p', null, d.overview.slice(0, 420)));
     var btns = el('div', 'btns');
     var play = el('button', 'primary', '\u25B6  Play');
-    play.onclick = function () { playCurrent(); };
+    play.onclick = function () {
+      /* Series never auto-play: the Play button opens the episode menu and the
+         viewer starts playback by clicking an episode. */
+      if (mt === 'tv') pickTmdbSeries(state.current);
+      else playCurrent();
+    };
     btns.appendChild(play);
     var back = el('button', 'ghost', 'Back');
     back.onclick = function () { renderSection(state.section); };
@@ -938,7 +943,7 @@
     return true;
   }
 
-  /* Backend episodes that arrive TOGETHER with the stream (MissAV's surrit
+  /* Backend episodes that arrive TOGETHER with the stream (a page's own
      sibling ladder, hentai.tv's episode list) enter the same engine. */
   function seedEpsLadder(it, eps, title) {
     if (!Array.isArray(eps) || eps.length < 2) return false;
@@ -1065,7 +1070,90 @@
       sRef.provisional = false;
       sRef.idx = ladderIdx(l2, it.page || it.url);
       paintSeriesControls();
+      paintSeriesPicker();
     }).catch(function () {});
+  }
+
+  /* ---------------- manual episode start (universal) ----------------
+     Every item the app knows to be a SERIES opens its episode menu first and
+     NOTHING plays until the viewer clicks an entry - even when the ladder has
+     exactly one episode, "Episode 1" is listed and must be clicked. The top-bar
+     dropdown mirrors the same ladder; the stage menu is the guaranteed explicit
+     click target (a one-option <select> never fires onchange). */
+  var pickActive = false;
+  function paintSeriesPicker() {
+    if (!pickActive) return;
+    var m = $('#pMsg');
+    if (!m) return;
+    var s = state.series;
+    var list = [], tmdb = !!(s && s.mode === 'tmdb');
+    if (tmdb && s.seasons && s.seasons.length) {
+      s.seasons.forEach(function (sn) {
+        (sn.eps || []).forEach(function (e2) { list.push({ s: sn.n, n: e2.n, t: e2.name || '' }); });
+      });
+    } else if (s && (s.eps || []).length) {
+      list = s.eps.filter(function (e2) { return e2 && e2.url; });
+    }
+    /* An unanswered ladder is still an explicit menu: Episode 1 is listed and
+       the click starts the resolver exactly like a populated one. */
+    if (!list.length) list = [{ s: 0, n: 1, t: String((s && s.title) || '') }];
+    m.innerHTML = '';
+    var head = document.createElement('h2');
+    head.textContent = (s && s.title) ? s.title : 'Select an episode';
+    m.appendChild(head);
+    var sub = document.createElement('p');
+    sub.textContent = 'Choose an episode to start playback.';
+    m.appendChild(sub);
+    var wrap = document.createElement('div');
+    wrap.className = 'picklist';
+    list.slice(0, 200).forEach(function (e2, i) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pickbtn';
+      b.textContent = tmdb ? ('S' + (e2.s || 1) + 'E' + (e2.n || 1))
+                           : ('Episode ' + (e2.n || (i + 1)));
+      b.onclick = function () {
+        pickActive = false;
+        if (tmdb) jumpTmdbEpisode(Number(e2.s || 1) || 1, Number(e2.n) || 1);
+        else if (s && s.mode === 'files') jumpFileEpisode(i);
+        else jumpPageEpisode(i);
+      };
+      wrap.appendChild(b);
+    });
+    m.appendChild(wrap);
+    m.classList.remove('hidden');
+    hideVideoControls();
+  }
+  /* Open a page-mode series WITHOUT playing: seed the ladder (provisional when
+     the parts are unknown) and show the menu; the real part list upgrades it in
+     the background through the exact fetch the playing path used. */
+  function pickPageSeries(it) {
+    showPlayer(it.t);
+    if (!ladderOwns(it)) clearSeries();
+    seedPageSeries(it) || setSeriesLadder(it, [], true);
+    var s0 = state.series;
+    if (s0) s0.base = { t: it.t, kind: it.kind || '', poster: it.poster || '', page: it.page || it.url || '', __grp: it.__grp };
+    pickActive = true;
+    paintSeriesPicker();
+    refreshSeriesParts(it, playEpoch);
+  }
+  /* Open a TMDB show WITHOUT playing: the season map fills the same menu, and
+     a backend that lists one single episode still requires the explicit click. */
+  function pickTmdbSeries(c) {
+    if (!c || !c.ref) return;
+    showPlayer(c.title);
+    state.current = c;
+    var sn = Number(c.ref.season || 1) || 1, en = Number(c.ref.episode || 1) || 1;
+    if (!state.series || state.series.mode !== 'tmdb' || String(state.series.tmdb) !== String(c.ref.tmdb)) {
+      state.series = { mode: 'tmdb', tmdb: String(c.ref.tmdb), title: c.title || '', season: sn, episode: en, seasons: [] };
+    } else {
+      state.series.season = sn;
+      state.series.episode = en;
+    }
+    paintSeriesControls();
+    pickActive = true;
+    paintSeriesPicker();
+    loadSeries(String(c.ref.tmdb), playEpoch);
   }
   /* A ladder step that IS a stream (a page holding every part as its own media
      URL) plays directly - re-extracting a media URL would only fail. */
@@ -1218,7 +1306,7 @@
     if (i < 0 || i >= list.length) return;
     s.idx = i;
     var step = list[i] || {};
-    var it = Object.assign({}, s.base || {}, { page: step.url });
+    var it = Object.assign({}, s.base || {}, { page: step.url, __picked: true });
     stopVideo(); stopEmbed();
     paintSeriesControls();
     /* A part can be the media FILE itself (a page that holds every part as its
@@ -1253,6 +1341,7 @@
       if (j && j.ok && Array.isArray(j.seasons) && j.seasons.length) {
         s.seasons = j.seasons.filter(function (x) { return x && x.eps && x.eps.length; });
         paintSeriesControls();
+        paintSeriesPicker();
       }
     } catch (e) {}
   }
@@ -1331,7 +1420,7 @@
       if (seriesGo(1)) return;
       var nx = state.next;
       if (!nx || !nx.url) return;
-      customPlay({ t: nx.title || 'Next episode', page: nx.url, kind: nx.kind || '' });
+      customPlay({ t: nx.title || 'Next episode', page: nx.url, kind: nx.kind || '', __picked: true });
     };
     /* Season / Episode selector: both listboxes are rebuilt by
        paintSeriesControls and drive the exact same jumps as Prev/Next. */
@@ -1505,7 +1594,6 @@
   }
 
   function playStream(url, title, opts) {
-    try { window.__WAB_LAST_STREAM__ = url || ''; } catch (e) {}
     opts = opts || {};
     var ep = playEpoch;
     stopEmbed();
@@ -2011,42 +2099,6 @@
      black/pink iframe fallback). */
   var CUSTOM_NATIVE = /^(hd|kd|kat|xs|anx)$/;
 
-  /* MissAV: unpack the surrit HLS from the video page (the renderer holds the
-     Cloudflare clearance) and play it natively; the source's own page is the
-     silent fallback - never a server list, never a challenge screen. */
-  async function mvPlay(it, re) {
-    /* A stream that belongs to the ladder already on screen keeps it; any
-       other title starts a clean series state. */
-    if (!ladderOwns(it)) clearSeries();
-    var ep = playEpoch;
-    var st = null;
-    try { st = await SC.mvStream(it.page); } catch (e) {}
-    if (ep !== playEpoch) return;
-    var emb = function () {
-      if (ep !== playEpoch) return;
-      if (!it.page) { unavailable(it); return; }
-      playEmbed(it.page, it.t, {
-        watchdog: 18000,
-        stallSwap: 14000,
-        onStuck: function () {
-          /* The page mount warmed surrit's clearance - one native retry
-             with a fresh signature before giving up. */
-          if (ep !== playEpoch) return;
-          if (!re) { setTimeout(function () { if (ep === playEpoch) mvPlay(it, true); }, 400); return; }
-          unavailable(it);
-        }
-      });
-    };
-    if (st || it.__grp) {
-      /* The sibling ladder travels with the answer (or with the card); seed
-         it before the stream mounts so the selector is live immediately. */
-      seedPageSeries(it) || seedEpsLadder(it, st && st.eps, st && st.title);
-    }
-    if (st && st.url) { playStream(st.url, it.t, { watchdog: 15000, onFail: emb }); return; }
-    if (it.page) { emb(); return; }
-    unavailable(it);
-  }
-
   /* Hentai.tv -> nhplayer: decode the signed mp4 in the renderer, play it
      natively; the local /raw twin (carrying the full signed raw string) and
      the source's own player/watch pages are silent fallbacks. */
@@ -2123,7 +2175,6 @@
        label and a placeholder entry that the scraped part list replaces the
        moment it arrives. */
     if (it.kind !== 'mv' && it.kind !== 'htv' && isSeriesCard(it) && !ladderOwns(it)) setSeriesLadder(it, [], true);
-    if (it.kind === 'mv' && it.page) return mvPlay(it, re);
     if (it.kind === 'htv' && it.page) return htvPlay(it);
     /* Standard sections wait up to 30s for a raw stream before the retry
        ladder moves on; the 18+ vault keeps its original extraction cap. */
@@ -2218,16 +2269,21 @@
       }
       if (ex.tmdb) {
         /* A page that carries a real TMDB id (KatMovieHD movies/series...)
-           skips the detail screen and goes straight into the provider race. */
-        playTmdb({
-          title: ex.title || it.t,
-          poster: it.poster || '',
-          ref: {
-            tmdb: String(ex.tmdb), imdb: ex.imdb || '',
-            type: (ex.mt === 'tv' || ex.type === 'tv') ? 'tv' : 'movie',
-            season: Number(ex.season || 1) || 1, episode: Number(ex.episode || 1) || 1
-          }
-        }).catch(function () { unavailable(it); });
+           skips the detail screen and goes straight into the provider race.
+           A SERIES answer still never auto-plays: the episode menu opens and
+           the viewer starts S1E1 (or any other episode) by hand. */
+        var exRef = {
+          tmdb: String(ex.tmdb), imdb: ex.imdb || '',
+          type: (ex.mt === 'tv' || ex.type === 'tv') ? 'tv' : 'movie',
+          season: Number(ex.season || 1) || 1, episode: Number(ex.episode || 1) || 1
+        };
+        var exC = { title: ex.title || it.t, poster: it.poster || '', ref: exRef };
+        var picked = !!(it && it.__picked);
+        var finish = function (c2) {
+          return playTmdb(c2).catch(function () { unavailable(it); });
+        };
+        if (exRef.type === 'tv' && !picked) { pickTmdbSeries(exC); return; }
+        finish(exC);
         return;
       }
     }
@@ -2297,6 +2353,9 @@
       if (it.file) { showPlayer(it.t); clearSeries(); var ep0 = playEpoch; SC.base().then(function (B) { if (ep0 !== playEpoch) return; playStream(B + '/raw?url=' + encodeURIComponent(it.file) + '&ref=' + encodeURIComponent(it.url || ''), it.t); }); return; }
       if (it.page) { try { window.bridge && window.bridge.openExternal(it.page); } catch (e) {} return; }
     }
+    /* Universal episode select: a series card opens its episode menu and waits
+       for an explicit episode click - never an automatic stream. */
+    if (isSeriesCard(it) && (it.page || it.url)) { pickPageSeries(it); return; }
     /* Problem/part cards that arrived grouped: raise the episode ladder the
        instant the click lands, before the resolver has answered. */
     if ((it.kind === 'mv' || it.kind === 'htv') && !ladderOwns(it)) seedPageSeries(it);
@@ -2418,42 +2477,6 @@
       toast('Settings saved.');
     };
   }
-
-  /* ---------------- test surface ----------------
-     Pure helpers exposed for the offline harness (no DOM, no network): the
-     episode-group annotation, the ladder ownership rules and the 18+ post
-     identity are all testable without booting the UI. */
-  try {
-    window.__WAB = {
-      attachEpisodeGroups: attachEpisodeGroups,
-      prepareItems: prepareItems,
-      seriesKeyOf: seriesKeyOf,
-      dedupeItems: dedupeItems,
-      postKey: postKey,
-      r34SeenReset: function () { r34Seen = new Set(); },
-      r34SeenSize: function () { return r34Seen.size; },
-      ladderIdx: ladderIdx,
-      ladderOwns: ladderOwns,
-      seedPageSeries: seedPageSeries,
-      seedEpsLadder: seedEpsLadder,
-      isSeriesCard: isSeriesCard,
-      epsToLadder: epsToLadder,
-      setSeriesLadder: setSeriesLadder,
-      paintSeriesControls: paintSeriesControls,
-      isDirectUrl: isDirectUrl,
-      jumpPageEpisode: jumpPageEpisode,
-      refreshSeriesParts: refreshSeriesParts,
-      openItem: openItem,
-      customPlay: customPlay,
-      seriesStep: seriesStep,
-      seriesChip: seriesChip,
-      epTag: epTag,
-      seriesGet: function () { return state.series; },
-      seriesSet: function (s) { state.series = s || null; },
-      normPage: normPage,
-      EP_TAIL_RE: EP_TAIL_RE
-    };
-  } catch (e) {}
 
   /* ---------------- boot ---------------- */
   function boot() {

@@ -69,9 +69,11 @@ class LocalStreamClientHandler(
                 if (asset != null) {
                     val bytes = readAsset(asset)
                     if (bytes != null) {
-                        /* Bundled JS/CSS/HTML is immutable for this build:
-                           let the WebView HTTP cache keep it across visits. */
-                        write(output, 200, mimeOf(asset), bytes, headOnly, "public, max-age=86400")
+                        /* Never cache UI assets: after an app update the WebView
+                           must pick up the new bundle immediately, not a copy
+                           from a previous install (serving them no-store costs
+                           nothing - they are read from the APK on each hit). */
+                        write(output, 200, mimeOf(asset), bytes, headOnly, "no-store")
                         return
                     }
                 }

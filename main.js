@@ -168,7 +168,12 @@ function startServer(port) {
       const file = path.join(__dirname, p);
       fs.readFile(file, function (err, data) {
         if (err) { res.writeHead(404); res.end('not found'); return; }
-        res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream' });
+        /* UI assets are read from disk on each hit - never let the renderer
+           cache them, so an app update always shows the new bundle. */
+        res.writeHead(200, {
+          'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
+          'Cache-Control': 'no-store'
+        });
         res.end(data);
       });
     });
@@ -384,8 +389,8 @@ app.whenReady().then(function () {
           if (lk === 'cf-mitigated') mit = String(v || '');
         });
         /* ONLY an explicit cf-mitigated: challenge is a real block. A plain
-           "server: cloudflare" subframe is just a CF-hosted page - nhplayer,
-           missav pages etc. live behind CF and must still be mountable. */
+           "server: cloudflare" subframe is just a CF-hosted page - nhplayer
+           pages etc. live behind CF and must still be mountable. */
         if (/challenge/i.test(mit)) cfSniff(d, 'hdr' + st);
       }
     } catch (e) {}
@@ -414,13 +419,12 @@ app.whenReady().then(function () {
   });
 
   /* Hotlink-protected media CDNs (rule34video, the eporner signed CDNs,
-     missav's surrit, hentaicity, nhplayer/1hanime...) accept a file only when
+     hentaicity, nhplayer/1hanime...) accept a file only when
      the Referer belongs to the site they serve for. Media elements played
      straight from this 127.0.0.1 page send ours (or none) - rewrite it for
      media traffic only. */
   const REF_FOR = [
     [/\.eporner\.com$|\.twinrdengine\.com$/i, 'https://www.eporner.com/'],
-    [/\.fourhoi\.com$|\.surrit\.com$|\.missav\.[a-z]+$/i, 'https://missav.ws/'],
     [/\.hentaicity\.com$/i, 'https://www.hentaicity.com/'],
     [/\.1hanime\.com$|\.nhplayer\.com$/i, 'https://nhplayer.com/'],
     [/\.rule34video\.com$/i, 'https://rule34video.com/'],
@@ -452,11 +456,10 @@ app.whenReady().then(function () {
     cb({});
   });
 
-  /* Cloudflare clearance sync: after the browser itself solves a challenge
-     (MissAV warmup), the cookies are pushed to the Node proxy so server-side
-     grabs of the same host return real pages instead of a challenge. */
+  /* Cloudflare clearance sync: after the browser itself solves a challenge,
+     the cookies are pushed to the Node proxy so server-side grabs of the
+     same host return real pages instead of a challenge. */
   const CK_HOSTS = [
-    'missav.ws', 'missav.ai', 'missav123.com', 'fourhoi.com', 'surrit.com',
     'hentaicity.com', 'hentai.tv', 'nhplayer.com',
     'kdramasmaza.net', 'katmoviehd.pk', 'xmaal.in', 'animixplay.la'
   ];

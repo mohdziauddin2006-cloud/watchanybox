@@ -197,6 +197,10 @@ class WebViewHolder(context: Context) {
         if (debuggable) WebView.setWebContentsDebuggingEnabled(true)
         val wv = WebView(ctx)
         wv.setBackgroundColor(android.graphics.Color.parseColor("#07070A"))
+        /* A previous install may have cached an older UI bundle under its own
+           cache headers; drop the disk cache once at startup so an app update
+           always boots the new bundle (UI assets are no-store anyway). */
+        wv.clearCache(true)
         wv.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true

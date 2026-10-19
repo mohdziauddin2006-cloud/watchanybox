@@ -22,7 +22,7 @@ A cross-platform, privacy-first streaming media center for Windows and Android �
 
 WatchAnyBox turns the messy business of streaming into one quiet, native surface. A local extraction engine resolves sources, the player mounts them inside the app, and a network-level shield removes ads, popups, and trackers before they load. Nothing you watch is ever written to disk.
 
-The same engine powers a **portable Windows desktop app** and a **native Android app** that adapts from phone to tablet to desktop-class windows. One catalogue, one player, one consistent experience — no browser handoff, no accounts, no telemetry.
+The same engine powers a **Windows desktop app** and a **native Android app** that adapts from phone to tablet to desktop-class windows. One catalogue, one player, one consistent experience — no browser handoff, no accounts, no telemetry.
 
 > **No ads. No history. No external browser.** Just the thing you came to watch.
 
@@ -31,7 +31,7 @@ The same engine powers a **portable Windows desktop app** and a **native Android
 ## Downloads
 
 <p align="center">
-  <a href="https://github.com/mohdziauddin2006-cloud/watchanybox/releases/download/v1.0.0/WatchAnyBox.exe">
+  <a href="https://github.com/mohdziauddin2006-cloud/watchanybox/releases/download/v1.0.0/WatchAnyBox-Setup-3.0.0.exe">
     <img src="https://img.shields.io/badge/Download_for_Windows-EXE_%C2%B7_x64-EC4899?style=for-the-badge&amp;logo=windows11&amp;logoColor=white" alt="Download WatchAnyBox for Windows" />
   </a>
   &nbsp;&nbsp;
@@ -46,16 +46,16 @@ The same engine powers a **portable Windows desktop app** and a **native Android
 
 | Platform | Artifact | Size | Direct download |
 |:--|:--|--:|:--|
-| 🪟 **Windows** | `WatchAnyBox.exe` — self-contained portable EXE, no installer | 95.7 MB | [**Download EXE →**](https://github.com/mohdziauddin2006-cloud/watchanybox/releases/download/v1.0.0/WatchAnyBox.exe) |
+| 🪟 **Windows** | `WatchAnyBox-Setup-3.0.0.exe` — NSIS installer (x64, per-user) | 106.6 MB | [**Download EXE →**](https://github.com/mohdziauddin2006-cloud/watchanybox/releases/download/v1.0.0/WatchAnyBox-Setup-3.0.0.exe) |
 | 🤖 **Android** | `WatchAnyBox.apk` — universal (arm64-v8a, armeabi-v7a, x86, x86_64) | 133.4 MB | [**Download APK →**](https://github.com/mohdziauddin2006-cloud/watchanybox/releases/download/v1.0.0/WatchAnyBox.apk) |
 
 <details>
 <summary><strong>Windows — first launch</strong></summary>
 
-1. Download `WatchAnyBox.exe` — one self-contained file.
-2. Run it — the app is portable and needs no installer. The Electron runtime, local UI server, extraction engine, and all frontend assets are embedded in the EXE.
+1. Download `WatchAnyBox-Setup-3.0.0.exe` and run it.
+2. The installer sets up the app per-user (no admin prompt) and adds a desktop + Start menu shortcut. Choose a custom folder if you like.
 3. If SmartScreen appears, choose **More info → Run anyway** (the build is unsigned).
-4. The UI is served locally from `http://127.0.0.1:46900`; the extraction engine binds `46901–46903`.
+4. Launch **WatchAnyBox** from the shortcut. The UI is served locally from `http://127.0.0.1:46900`; the extraction engine binds `46901–46903`.
 
 </details>
 
@@ -74,8 +74,8 @@ The same engine powers a **portable Windows desktop app** and a **native Android
 
 | Artifact | SHA-256 |
 |:--|:--|
-| `WatchAnyBox.exe` | `5ddd2f8ea42b045600c807d26fa918989d6126f8db8f0a53ad74bb23a4f14885` |
-| `WatchAnyBox.apk` | `b83ef2a7ba38986b3a2a3efa528ccd11c3b466e8294e4ef89774684d63a0bfea` |
+| `WatchAnyBox-Setup-3.0.0.exe` | `180f54f4246e533c983977a574f2b2adeff3f7b210c2f5bea479d00aacefc930` |
+| `WatchAnyBox.apk` | `c0ef79f067e65f9f41c485ad26d55e8e85120d5e7f47ad8de7319261da9cc741` |
 
 </details>
 
@@ -85,7 +85,7 @@ The same engine powers a **portable Windows desktop app** and a **native Android
 
 | | Feature | What it does |
 |:--:|:--|:--|
-| 🪟🤖 | **Multi-Platform** | A portable Windows EXE and a universal Android APK share the same catalogue, engine, and player behaviour. |
+| 🪟🤖 | **Multi-Platform** | A Windows installer and a universal Android APK share the same catalogue, engine, and player behaviour. |
 | 🕵️ | **Zero-History Privacy** | No watch history, search log, resume state, or telemetry. Only an optional TMDB key and your metadata language are stored locally. |
 | 🗣️ | **Smart Language Priority** | Audio and subtitle tracks are ranked **Hindi → English → original**, automatically, wherever a stream exposes multiple tracks. |
 | 🔐 | **Secure Vault** | The 18+ catalogue is compartmentalized behind one dedicated destination, excluded from Home's Super Search and every SFW row — a hard content boundary, intentionally frictionless rather than a PIN gate. |

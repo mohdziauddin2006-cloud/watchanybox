@@ -51,7 +51,7 @@
 
   /* Chromium FIRST: the renderer's real browser fingerprint plus the session's
      clearance cookies sail through Cloudflare challenges and per-IP scraping
-     rate limits that stall the Node proxy (missav, katmoviehd.pk, ...). The
+     rate limits that stall the Node proxy (katmoviehd.pk, hentaicity, ...). The
      Node proxy and allorigins stay as silent fallbacks.
      NOTE: the bare "challenge-platform" string also appears on NORMAL pages
      (the benign /cdn-cgi/challenge-platform/scripts/jsd/main.js snippet), so
@@ -148,27 +148,12 @@
   }
   function imgAlt(inner) { var m = inner.match(/<img[^>]+alt=["']([^"']+)["']/i); return m ? strip(m[1]) : ''; }
 
-  /* Dean Edwards packer unpacker - MissAV hides its real stream URL inside an
-     eval(function(p,a,c,k,e,d)) blob; unpack it back to plain JS text. The
-     function body between the header and the call site varies in length
-     (the standard packer body runs ~220 chars), so the gap must be generous. */
-  function unpackEval(t) {
-    var m = String(t || '').match(/eval\(function\(p,a,c,k,e,d\)[\s\S]{0,600}?\}\('([\s\S]*?)',\s*(\d+),\s*(\d+),\s*'([\s\S]*?)'\.split\('\|'\)/);
-    if (!m) return '';
-    var p = m[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
-    var a = parseInt(m[2], 10) || 36, c = parseInt(m[3], 10) || 0, k = m[4].split('|');
-    while (c--) {
-      if (k[c]) { try { p = p.replace(new RegExp('\\b' + c.toString(a) + '\\b', 'g'), k[c]); } catch (e) {} }
-    }
-    return p;
-  }
-
   /* ---------------- universal episode ladder (client side) ----------------
      Mirrors the backend rules (srv2.findEpisodeLinks): an episode token in a
      URL ('-s1-e5', 's01e05', '1x05', 'episode-3', 'part-2', '?ep=4') pins the
      show, and every same-host link with the SAME normalized shape - or, from a
      series landing page, the same path extended by one short episode token -
-     is a sibling episode. Cloudflare-protected providers (MissAV, Hentaicity)
+     is a sibling episode. Cloudflare-protected providers (Hentaicity)
      cannot be read by the Node backend but ARE readable here in the real
      browser session, so the ladder is parsed from HTML the renderer already
      fetched. Nothing else (page 2 of a list, another show) ever qualifies. */
@@ -397,7 +382,7 @@
     return out;
   }
   /* The classic token-only ladder: kept for providers whose pages hold ONE
-     video (MissAV surrit, hentai players) - media parts never apply there. */
+     video (hentai players) - media parts never apply there. */
   function ladderFromHtml(html, pageUrl) {
     return partsFromHtml(html, pageUrl, { media: false });
   }
@@ -706,130 +691,6 @@
     return out;
   }
 
-  /* ---------------- MissAV (JAV) ---------------- */
-  function parseMissav(html, host, badge) {
-    var out = [], seen = {}, re = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, m;
-    while ((m = re.exec(html))) {
-      var href = decode(m[1]).trim(), inner = m[2];
-      if (!href || href.charAt(0) === '#' || JUNK.test(href)) continue;
-      var a = abs(href, host);
-      if (!a || a.indexOf(host) !== 0) continue;
-      if (!/\/(en|ja|zh|ko)\/[a-z0-9_-]+/i.test(a) || /\/(new|genres|actresses|makers|labels|series|uncensored-leak|fc2|siro|luxu|tokyohot)(\/|$)/i.test(a)) continue;
-      var img = firstImg(inner);
-      if (!img || img.indexOf('fourhoi') < 0) continue;
-      var alt = imgAlt(inner);
-      var t = cleanTitle(alt || strip(inner) || a.split('/').filter(Boolean).pop() || '');
-      if (!t || t.length < 3 || JUNK_TITLE.test(t)) continue;
-      if (seen[a]) continue;
-      seen[a] = 1;
-      out.push({ t: t.slice(0, 100), poster: img, page: a, badge: badge || 'JAV', kind: 'mv' });
-      if (out.length >= 48) break;
-    }
-    return out;
-  }
-  var mvHost = null, missavWarm = false;
-  /* MissAV sits behind Cloudflare. Loading it once in a real (hidden) frame
-     lets the challenge solve and drops the clearance cookies into the session;
-     every later direct fetch from this renderer then looks like the real
-     browser and returns the SSR page. */
-  function warmMissav() {
-    return new Promise(function (res) {
-      if (missavWarm) return res(false);
-      missavWarm = true;
-      var f = document.createElement('iframe');
-      f.style.cssText = 'position:fixed;left:-4000px;top:0;width:1280px;height:900px;border:0;visibility:hidden';
-      var done = false;
-      function fin() { if (done) return; done = true; try { f.parentNode && f.parentNode.removeChild(f); } catch (e) {} res(true); }
-      f.onload = function () { setTimeout(fin, 9000); };
-      try { f.src = 'https://missav.ws/en/new'; } catch (e) {}
-      (document.body || document.documentElement).appendChild(f);
-      setTimeout(fin, 26000);
-    });
-  }
-  function mvFrame(path) {
-    return new Promise(function (res) {
-      var f = document.createElement('iframe');
-      f.style.cssText = 'position:fixed;left:-4000px;top:0;width:1280px;height:900px;border:0;visibility:hidden';
-      var done = false;
-      function fin(h) { if (done) return; done = true; try { f.parentNode && f.parentNode.removeChild(f); } catch (e) {} res(h || null); }
-      f.onload = function () {
-        setTimeout(function () {
-          var n = 0;
-          (function chk() {
-            n++; var h = null;
-            try { h = f.contentDocument && f.contentDocument.documentElement && f.contentDocument.documentElement.outerHTML; } catch (e) {}
-            if (h && h.indexOf('fourhoi.com') >= 0) return fin(h);
-            if (n < 10) return setTimeout(chk, 1300);
-            fin(h);
-          })();
-        }, 1200);
-      };
-      f.src = 'https://missav.ws' + path;
-      (document.body || document.documentElement).appendChild(f);
-      setTimeout(function () { fin(null); }, 26000);
-    });
-  }
-  async function mvRow(row) {
-    var hosts = mvHost ? [mvHost].concat(ZAI.MISSAV_HOSTS) : ZAI.MISSAV_HOSTS;
-    var attempt = async function () {
-      for (var i = 0; i < hosts.length; i++) {
-        try {
-          var html = await fetchText(hosts[i] + row.path, 13000);
-          if (html && html.indexOf('fourhoi') >= 0) {
-            mvHost = hosts[i];
-            var items = parseMissav(html, hosts[i], row.badge);
-            if (items.length) return items;
-          }
-        } catch (e) {}
-      }
-      return null;
-    };
-    var first = await attempt();
-    if (first && first.length) return first;
-    /* Cold session: solve the Cloudflare challenge in a real frame once,
-       then retry the direct fetches with the fresh clearance cookies. */
-    await warmMissav();
-    var second = await attempt();
-    if (second && second.length) return second;
-    try {
-      var h = await mvFrame(row.path);
-      if (h && h.indexOf('fourhoi') >= 0) {
-        var r2 = parseMissav(h, 'https://missav.ws', row.badge);
-        if (r2.length) return r2;
-      }
-    } catch (e) {}
-    return [];
-  }
-
-  /* MissAV stream decode: the video page hides the real HLS URL inside a
-     Dean Edwards eval blob (surrit.com/<uuid>/playlist.m3u8). The renderer's
-     real browser fingerprint (with the warmup clearance) is the only client
-     that can read that page, so unpack it here. */
-  async function mvStream(pageUrl) {
-    if (!pageUrl) return null;
-    var html = '';
-    try { html = await fetchText(pageUrl, 15000); } catch (e) { return null; }
-    if (!html) return null;
-    /* Multi-part titles (a JAV with Part 1/2/3, a series page) keep their
-       sibling ladder: the player mounts the same Season/Episode selector +
-       Prev/Next controls it uses everywhere else. Parsed here because the
-       Node backend cannot read MissAV's Cloudflare-fronted pages - the real
-       browser session can. */
-    var eps = [];
-    try { eps = ladderFromHtml(html, pageUrl); } catch (e) { eps = []; }
-    var src = html;
-    if (html.indexOf('eval(function(p,a,c,k,e,d)') >= 0) {
-      var un = unpackEval(html);
-      if (un) src = un;
-    }
-    var m = src.match(/https?:\/\/surrit\.com\/[a-z0-9-]+\/playlist\.m3u8/i) ||
-            src.match(/https?:\/\/[^"'\s<>\\]*surrit[^"'\s<>\\]*\.m3u8[^"'\s<>\\]*/i);
-    if (!m) return eps.length > 1 ? { url: '', host: 'surrit.com', eps: eps } : null;
-    var out = { url: m[0].replace(/\\\//g, '/'), host: 'surrit.com' };
-    if (eps.length > 1) out.eps = eps;
-    return out;
-  }
-
   /* ---------------- Hentaicity (direct signed HLS) ---------------- */
   /* Card markup: <a href=".../click/1-1/video/<slug>.html" class="thumb-img
      pop-execute"> with the poster <img alt="title">, <span class="time">,
@@ -940,37 +801,27 @@
     return { raw: dec, url: dec.split('|')[0], playerUrl: playerUrl };
   }
 
-  /* MissAV search: same listed-only scrapers, keyword path /en/search/<q>. */
-  async function mvSearch(q) {
+  /* ---------------- JAV (123av, server-side catalogue) ----------------
+     The backend resolves the whole lane: one bounded upstream fetch per row
+     and one /extract answer per video (native HLS). The renderer never
+     scrapes the site itself, so a Cloudflare/CORS dead end cannot stall the
+     row. Search falls back to the Eporner JAV shelf when 123av has no hit. */
+  async function javRow(row) {
+    var B = await base();
+    var j = await fetchJSON(B + '/jav?row=' + enc(row.p || 'new'), 15000);
+    return ((j && j.items) || []);
+  }
+  async function javSearch(q) {
     var term = String(q || '').trim();
     if (!term) return [];
-    var hosts = mvHost ? [mvHost].concat(ZAI.MISSAV_HOSTS) : ZAI.MISSAV_HOSTS;
-    var attempt = async function () {
-      for (var i = 0; i < hosts.length; i++) {
-        try {
-          var html = await fetchText(hosts[i] + '/en/search/' + enc(term), 13000);
-          if (html && html.indexOf('fourhoi') >= 0) {
-            mvHost = hosts[i];
-            var items = parseMissav(html, hosts[i], 'JAV');
-            if (items.length) return items;
-          }
-        } catch (e) {}
-      }
-      return null;
-    };
-    var r = await attempt();
-    if (r && r.length) return r.slice(0, 24);
-    await warmMissav();
-    r = await attempt();
-    if (r && r.length) return r.slice(0, 24);
+    var B = await base();
+    var out = [];
     try {
-      var h = await mvFrame('/en/search/' + enc(term));
-      if (h && h.indexOf('fourhoi') >= 0) {
-        var r2 = parseMissav(h, 'https://missav.ws', 'JAV');
-        if (r2.length) return r2.slice(0, 24);
-      }
+      var j = await fetchJSON(B + '/jav?q=' + enc(term), 15000);
+      out = ((j && j.items) || []);
     } catch (e) {}
-    return [];
+    if (!out.length) { try { out = await epSearch('japanese ' + term); } catch (e) {} }
+    return out.slice(0, 24);
   }
 
   /* TMDB search through the local key-injecting proxy (adult vault only). */
@@ -1209,7 +1060,7 @@
     if (section === 'adult') {
       sub = sub || 'jav';
       if (sub === 'jav') {
-        try { out = out.concat(await mvSearch(q)); } catch (e) {}
+        try { out = out.concat(await javSearch(q)); } catch (e) {}
       } else if (sub === 'eporner') {
         try { out = out.concat(await epSearch(q)); } catch (e) {}
       } else if (sub === 'rule34') {
@@ -1287,9 +1138,8 @@
   SC.epRow = epRow;
   SC.r34Row = r34Row;
   SC.r34vRow = r34vRow;
-  SC.mvRow = mvRow;
-  SC.mvStream = mvStream;
-  SC.mvSearch = mvSearch;
+  SC.javRow = javRow;
+  SC.javSearch = javSearch;
   SC.hcRow = hcRow;
   SC.hcSearch = hcSearch;
   SC.htvRow = htvRow;

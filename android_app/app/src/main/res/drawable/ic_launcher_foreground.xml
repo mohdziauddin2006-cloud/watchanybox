@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive foreground: dark rounded screen + play mark, sized for the
+     66dp safe zone of the 108dp adaptive canvas. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#E50914"
-        android:pathData="M54,108c29.8,0 54,-24.2 54,-54S83.8,0 54,0 0,24.2 0,54 24.2,108 54,108z" />
+        android:fillColor="#08080C"
+        android:pathData="M37.5,30 h33 a7.5,7.5 0 0 1 7.5,7.5 v33 a7.5,7.5 0 0 1 -7.5,7.5 h-33 a7.5,7.5 0 0 1 -7.5,-7.5 v-33 a7.5,7.5 0 0 1 7.5,-7.5 z" />
+    <path
+        android:fillColor="#F5F5FF"
+        android:pathData="M47.3,47.5 L67.4,54 L47.3,60.5 Z" />
 </vector>

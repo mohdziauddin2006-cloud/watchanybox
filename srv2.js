@@ -5,6 +5,45 @@
    TLS socket is created. */
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
+/* Some ISP resolvers hijack well-known API hosts (seen live: api.themoviedb.org
+   resolved to a blackhole IP while 1.1.1.1 answers the real CloudFront set).
+   Public DNS is attempted first for every backend fetch; after repeated public
+   failures (locked-down networks that block outbound Port 53) the wrapper
+   stands down permanently and the OS resolver handles everything again. */
+(function hardenedDns() {
+  try {
+    const dns = require('dns');
+    const baseLookup = dns.lookup;
+    const pub4 = dns.promises.resolve4.bind(dns.promises);
+    const pub6 = dns.promises.resolve6.bind(dns.promises);
+    let fails = 0, off = false;
+    try { dns.setServers(['1.1.1.1', '8.8.8.8', '1.0.0.1']); } catch (e) { return; }
+    dns.lookup = function (host, opts, cb) {
+      if (typeof opts === 'function') { cb = opts; opts = {}; }
+      if (off) return baseLookup.call(dns, host, opts, cb);
+      const all = !!(opts && opts.all);
+      pub4(host).then(function (a4) {
+        if (!a4 || !a4.length) throw new Error('no A');
+        fails = 0;
+        const list = a4.map(function (a) { return { address: a, family: 4 }; });
+        if (all) return cb(null, list);
+        cb(null, list[0].address, 4);
+      }).catch(function () {
+        pub6(host).then(function (a6) {
+          if (!a6 || !a6.length) throw new Error('no AAAA');
+          fails = 0;
+          const list = a6.map(function (a) { return { address: a, family: 6 }; });
+          if (all) return cb(null, list);
+          cb(null, list[0].address, 6);
+        }).catch(function () {
+          if (++fails >= 4) off = true;
+          baseLookup.call(dns, host, opts, cb);
+        });
+      });
+    };
+  } catch (e) {}
+})();
+
 // srv2.js - WatchAnyBox local proxy + extractor (ports 46901-46903)
 const http = require('http');
 const { Readable } = require('stream');
@@ -152,7 +191,7 @@ const CF_DEAD_PAGE = '<!doctype html><html><head><meta charset="utf-8"><style>ht
 
 /* Custom library sources. Cards that carry one of these hosts are ALWAYS
    resolved here on the backend - they never fall back to a server scanner. */
-const CUSTOM_SRC_RE = /(katmoviehd|kdramasmaza|xmaal|zmaal|animixplay|missav|hentaicity|hentai\.tv|nhplayer|1hanime|huangguodrama)/i;
+const CUSTOM_SRC_RE = /(katmoviehd|kdramasmaza|xmaal|zmaal|animixplay|hentaicity|hentai\.tv|nhplayer|1hanime|huangguodrama)/i;
 
 /* Never surfaced to the player: advertising, popup, tracker and widget frames. */
 const JUNK_FRAME_RE = /(doubleclick|googlesyndication|googleadservices|google-analytics|googletagmanager|facebook|twitter\.com\/intent|platform\.twitter|amazon-adsystem|adnxs|histats|yandex|vk\.com\/share|addthis|sharethis|disqus|outbrain|taboola|mgid|zergnet|criteo|pubmatic|rubicon|openx|smartadserver|teads|triplelift|sharethrough|smaato|inmobi|loopme)/i;
@@ -633,8 +672,8 @@ async function epornerSources(pageUrl, html) {
   } catch (e) { return null; }
 }
 
-/* Dean Edwards packer unpacker - MissAV hides its real stream URL inside an
-   eval(function(p,a,c,k,e,d)) blob; unpack it back to plain JS text. */
+/* Dean Edwards packer unpacker - several providers hide the real stream URL
+   inside an eval(function(p,a,c,k,e,d)) blob; unpack it back to plain JS. */
 function unpackEval(t) {
   const m = String(t || '').match(/eval\(function\(p,a,c,k,e,d\)[\s\S]{0,120}?\}\('([\s\S]*?)',\s*(\d+),\s*(\d+),\s*'([\s\S]*?)'\.split\('\|'\)/);
   if (!m) return '';
@@ -647,16 +686,126 @@ function unpackEval(t) {
   return p;
 }
 
-/* MissAV video pages: the surrit.com HLS playlist lives in the packed blob. */
-function missavStream(html) {
-  let src = String(html || '');
-  if (src.indexOf('eval(function(p,a,c,k,e,d)') >= 0) {
-    const un = unpackEval(src);
-    if (un) src = un;
+/* ---------------- JAV catalogue + stream resolver (123av.com) ----------------
+   123av serves clean SSR catalogue pages (no challenge) and real HLS streams,
+   so the whole JAV lane is resolved server-side here: catalogue rows answer in
+   one bounded fetch and a video page turns into a native .m3u8 the app's own
+   player can seek. */
+const JAV_BASE = 'https://123av.com';
+const JAV_ROWS = {
+  new:        { path: '/en/new',               badge: 'JAV-NEW' },
+  hot:        { path: '/en/hot',               badge: 'JAV-HOT' },
+  recent:     { path: '/en/recent',            badge: 'JAV-REC' },
+  today:      { path: '/en/all?sort=today',    badge: 'JAV-TRD' },
+  week:       { path: '/en/all?sort=week',     badge: 'JAV-WK' },
+  top:        { path: '/en/all?sort=month',    badge: 'JAV-TOP' },
+  uncensored: { path: '/en/uncensored',        badge: 'JAV-UNC' },
+  leaked:     { path: '/en/uncensored-leaked', badge: 'LEAK' },
+  fc2:        { path: '/en/makers/fc2',        badge: 'FC2' }
+};
+function javText(s) {
+  return String(s || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
+    .replace(/&mdash;/g, '\u2014').replace(/&hellip;/g, '\u2026')
+    .replace(/\s+/g, ' ').trim();
+}
+/* 123av cards are two anchors per video (thumbnail + title). The title anchor
+   carries .card__link; the thumbnail anchor carries .card__img + .card__dur.
+   Both share /en/v/<slug>, so the maps are joined by href - no fragile
+   container regex. */
+function javParse(html) {
+  const titles = new Map();
+  const tRe = /<a[^>]+class=["'][^"']*card__link[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = tRe.exec(String(html || '')))) {
+    if (/^\/en\/v\//.test(m[1])) titles.set(m[1], javText(m[2]));
   }
-  const m = src.match(/https?:\/\/surrit\.com\/[a-z0-9-]+\/playlist\.m3u8/i) ||
-            src.match(/https?:\/\/[^"'\s<>\\]*surrit[^"'\s<>\\]*\.m3u8[^"'\s<>\\]*/i);
-  return m ? m[0].replace(/\\\//g, '/') : '';
+  const out = [], seen = new Set();
+  const cRe = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  while ((m = cRe.exec(String(html || '')))) {
+    const href = m[1], inner = m[2];
+    if (!/^\/en\/v\//.test(href) || seen.has(href)) continue;
+    const im = inner.match(/<img[^>]+class=["'][^"']*card__img[^"']*["'][^>]*src=["']([^"']+)["']/i);
+    if (!im) continue;
+    const t = javText(titles.get(href) || '');
+    if (!t || t.length < 2) continue;
+    const dur = javText((inner.match(/<span[^>]+class=["'][^"']*card__dur[^"']*["'][^>]*>([^<]+)</i) || [])[1] || '');
+    seen.add(href);
+    out.push({ t: t.slice(0, 110), poster: im[1], page: JAV_BASE + href, dur: dur, kind: 'jav' });
+    if (out.length >= 40) break;
+  }
+  return out;
+}
+async function javFeed(rowId, q) {
+  const term = String(q || '').trim();
+  const row = JAV_ROWS[rowId] || JAV_ROWS.new;
+  if (term) {
+    const r = await grab(JAV_BASE + '/en/search?keyword=' + encodeURIComponent(term), JAV_BASE + '/', undefined, undefined, 12000);
+    const items = javParse(await r.text());
+    items.forEach(function (it) { it.badge = 'RES'; });
+    return items;
+  }
+  /* SSR pages carry 12 cards; a second page doubles the row for one extra
+     bounded fetch (the two run in parallel). */
+  const paths = [row.path];
+  if (row.path === '/en/new' || row.path === '/en/recent' || row.path.indexOf('/en/all') === 0) {
+    paths.push(row.path + (row.path.indexOf('?') >= 0 ? '&page=2' : '?page=2'));
+  }
+  const pages = await Promise.all(paths.map(async function (p) {
+    try {
+      const r = await grab(JAV_BASE + p, JAV_BASE + '/', undefined, undefined, 12000);
+      return javParse(await r.text());
+    } catch (e) { return []; }
+  }));
+  const out = [], seen = new Set();
+  pages.forEach(function (items) {
+    (items || []).forEach(function (it) {
+      if (seen.has(it.page) || out.length >= 40) return;
+      seen.add(it.page);
+      it.badge = row.badge;
+      out.push(it);
+    });
+  });
+  return out;
+}
+/* The video page embeds its episode list as x-data="player(JSON.parse('...'))".
+   That payload is a JS string literal wrapping JSON, so it must be decoded
+   with a real escape pass (\\u0022 -> \", \\/ -> /) before JSON.parse; the
+   first episode's plyr embed URL then answers the signed HLS via /stream. */
+function javJsString(src) {
+  return String(src).replace(/\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[\s\S])/g, function (mm, g) {
+    if (g.charAt(0) === 'u' || g.charAt(0) === 'x') return String.fromCharCode(parseInt(g.slice(1), 16));
+    if (g === 'n') return '\n';
+    if (g === 'r') return '\r';
+    if (g === 't') return '\t';
+    return g;
+  });
+}
+function javEmbedUrl(html) {
+  const m = String(html || '').match(/player\(JSON\.parse\('([\s\S]*?)'\)/);
+  if (!m) return '';
+  try {
+    const arr = JSON.parse(javJsString(m[1]));
+    for (const e2 of (arr || [])) {
+      if (e2 && e2.url && /\/e\//i.test(String(e2.url))) return String(e2.url);
+    }
+  } catch (e) {}
+  return '';
+}
+async function javStream(html) {
+  const embed = javEmbedUrl(html);
+  if (!embed) return null;
+  const idm = embed.match(/\/e\/([a-z0-9_]+)/i);
+  if (!idm) return null;
+  const r = await grab('https://sadie-shop.site/stream?id=' + idm[1], embed, undefined, undefined, 12000);
+  const body = await r.text();
+  let j = null;
+  try { j = JSON.parse(body); } catch (e) { return null; }
+  const f = j && j.media && j.media.stream;
+  if (!f || !/\.(?:m3u8|mp4)(?:[?#]|$)/i.test(f)) return null;
+  return { type: /\.m3u8/i.test(f) ? 'hls' : 'direct', file: f, ref: 'https://sadie-shop.site/', source: '123av' };
 }
 
 /* TMDB id resolution used only when a page exposes no stream at all (DRM
@@ -669,9 +818,9 @@ async function tmdbByTitle(rawTitle, preferTv){
   const asks = preferTv ? ['tv', 'multi'] : ['multi'];
   for (let a = 0; a < asks.length; a++) {
     try {
-      const r = await grab('https://api.themoviedb.org/3/search/' + asks[a] + '?api_key=' + TMDB_KEY + '&query=' + encodeURIComponent(cleanTitle), undefined, undefined, undefined, 9000);
+      const r = await tmdbJson('https://api.themoviedb.org/3/search/' + asks[a] + '?api_key=' + TMDB_KEY + '&query=' + encodeURIComponent(cleanTitle), 9000);
       if (!r || !r.ok) continue;
-      const j = await r.json();
+      const j = JSON.parse(r.body.toString('utf8'));
       const pool = ((j && j.results) || []).filter(function (x) {
         if (!x || x.adult) return false;
         if (asks[a] === 'tv') return true;
@@ -1533,9 +1682,9 @@ async function tmdbEpisodes(id) {
   const base2 = 'https://api.themoviedb.org/3/tv/' + encodeURIComponent(key);
   let d = null;
   try {
-    const r = await grab(base2 + '?api_key=' + TMDB_KEY, undefined, undefined, undefined, 9000);
+    const r = await tmdbJson(base2 + '?api_key=' + TMDB_KEY, 9000);
     if (!r || !r.ok) return null;
-    d = await r.json();
+    d = JSON.parse(r.body.toString('utf8'));
   } catch (e) { return null; }
   if (!d) return null;
   const seasons = (Array.isArray(d.seasons) ? d.seasons : [])
@@ -1546,9 +1695,9 @@ async function tmdbEpisodes(id) {
     const n = Number(s.season_number);
     const label = String(s.name || ('Season ' + n));
     try {
-      const rr = await grab(base2 + '/season/' + n + '?api_key=' + TMDB_KEY, undefined, undefined, undefined, 9000);
+      const rr = await tmdbJson(base2 + '/season/' + n + '?api_key=' + TMDB_KEY, 9000);
       if (!rr || !rr.ok) return { n: n, name: label, eps: [] };
-      const sd = await rr.json();
+      const sd = JSON.parse(rr.body.toString('utf8'));
       const eps = (Array.isArray(sd.episodes) ? sd.episodes : [])
         .filter(function (e2) { return e2 && Number(e2.episode_number) > 0; })
         .sort(function (a, b) { return Number(a.episode_number) - Number(b.episode_number); })
@@ -1625,8 +1774,8 @@ function hdr(res){
   res.setHeader('Access-Control-Allow-Headers', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
 }
-/* Cloudflare clearance cookies for scraper hosts (missav, ...) - pushed from
-   the app's real browser session so Node grabs are not served a challenge. */
+/* Cloudflare clearance cookies for scraper hosts - pushed from the app's
+   real browser session so Node grabs are not served a challenge. */
 const COOKJAR = new Map();
 function cookFor(host) {
   for (const k of COOKJAR.keys()) { if (host === k || host.endsWith('.' + k)) return COOKJAR.get(k); }
@@ -1657,6 +1806,44 @@ async function grab(url, referer, range, ua, ms){
   return r;
 }
 
+/* api.themoviedb.org is a repeat DNS-hijack victim: some ISP resolvers hand
+   back a blackhole address while public DNS answers the real CloudFront set.
+   Node's fetch does not consistently honour a patched dns.lookup (the Electron
+   main process keeps its own connector), so TMDB requests resolve explicitly
+   through public DNS and connect with that lookup supplied to https. */
+const TMDB_DNS = { t: 0, ips: [] };
+async function tmdbIps() {
+  if (TMDB_DNS.ips.length && Date.now() - TMDB_DNS.t < 300000) return TMDB_DNS.ips;
+  const ips = await require('dns').promises.resolve4('api.themoviedb.org').catch(function () { return []; });
+  if (ips.length) { TMDB_DNS.t = Date.now(); TMDB_DNS.ips = ips; }
+  return ips;
+}
+async function tmdbJson(rawUrl, ms) {
+  const u = new URL(rawUrl);
+  const ips = await tmdbIps();
+  const lookup = function (host, opts, cb) {
+    if (!ips.length) return require('dns').lookup(host, opts, cb);
+    if (opts && opts.all) return cb(null, ips.map(function (a) { return { address: a, family: 4 }; }));
+    cb(null, ips[0], 4);
+  };
+  const https = require('https');
+  return new Promise(function (resolve, reject) {
+    const req = https.get(u, {
+      lookup: lookup,
+      timeout: ms || 9000,
+      headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Accept-Language': 'en-US,en;q=0.9' }
+    }, function (r) {
+      const chunks = [];
+      r.on('data', function (c) { chunks.push(c); });
+      r.on('end', function () {
+        resolve({ status: r.statusCode || 0, ok: r.statusCode >= 200 && r.statusCode < 300, body: Buffer.concat(chunks), headers: r.headers || {} });
+      });
+    });
+    req.on('timeout', function () { req.destroy(new Error('tmdb timeout')); });
+    req.on('error', reject);
+  });
+}
+
 // 10-second in-memory response cache
 const CACHE_TTL = 10000;
 const memCache = new Map();
@@ -1683,7 +1870,7 @@ const CATALOG_PAGE_TTL = 10 * 60 * 1000;
 const catalogCache = new Map();
 function isCatalogPath(path) {
   return path === '/tmdb' || path.indexOf('/tmdb/') === 0 ||
-    path === '/eps' || path === '/r34' || path === '/page';
+    path === '/eps' || path === '/r34' || path === '/jav' || path === '/page';
 }
 function catalogTtl(path) {
   return path === '/page' ? CATALOG_PAGE_TTL : CATALOG_TTL;
@@ -1823,6 +2010,21 @@ async function handle(req, res){
     }
   }
 
+  /* JAV catalogue feed (123av SSR rows / search). Answers in ONE bounded
+     upstream fetch, so the 18+ JAV rows can never sit on "Loading..." again;
+     the JSON is catalogue-cached for the vault's revisit window. */
+  if (path === '/jav') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    try {
+      const items = await javFeed(u.searchParams.get('row') || 'new', u.searchParams.get('q') || '');
+      const body = JSON.stringify({ ok: true, items: items });
+      setCatalogCached(req.url, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, body, items.length ? CATALOG_TTL : 60 * 1000);
+      return res.end(body);
+    } catch (e) {
+      return res.end('{"ok":false,"items":[]}');
+    }
+  }
+
   /* Rule34 post feed (server-side, strictly deduped by post id / normalized
      media URL) - the animated vault rows read this before touching the DOM. */
   if (path === '/r34') {
@@ -1854,14 +2056,11 @@ async function handle(req, res){
     catch (e) { res.writeHead(400, {'Content-Type':'application/json; charset=utf-8'}); return res.end('{"error":"bad tmdb path"}'); }
     if (!tgt.searchParams.get('api_key')) tgt.searchParams.set('api_key', TMDB_KEY);
     try {
-      /* Cold-start networks (first DNS lookup / TLS handshake on a device that
-         just booted) can fail the very first request; one bounded retry keeps
-         the worst case (7s + 7s) under the renderer's 15s client timeout. */
-      let r;
-      try { r = await grab(tgt.href, undefined, undefined, undefined, 7000); }
-      catch (e1) { r = await grab(tgt.href, undefined, undefined, undefined, 7000); }
-      const body = Buffer.from(await r.arrayBuffer());
-      const cType = r.headers.get('content-type') || 'application/json; charset=utf-8';
+      /* One bounded public-DNS request (see tmdbJson); TMDB answers in ms once
+         the real CloudFront edge is reached, so no second attempt is needed. */
+      const r = await tmdbJson(tgt.href, 9000);
+      const body = r.body;
+      const cType = (r.headers && r.headers['content-type']) || 'application/json; charset=utf-8';
       const hdrs = { 'Content-Type': cType, 'X-Upstream-Status': String(r.status) };
       setCached(req.url, r.status, hdrs, body);
       /* Catalogue rows (trending/popular/discover, search pages) live 15
@@ -1888,10 +2087,7 @@ async function handle(req, res){
       return res.end(JSON.stringify(o));
     };
     /* Attach a ready-to-play local proxy twin so the native <video> never
-       fights upstream Referer / CORS / mixed-content rules. Surrit (missav's
-       CDN) is Cloudflare-fingerprinted against anything that is not the real
-       browser: those play natively in Chromium with the missav referer, so
-       no proxy twin is attached for them. */
+       fights upstream Referer / CORS / mixed-content rules. */
     const emit = function (o) {
       o.ok = o.ok !== false;
       if ((o.type === 'direct' || o.type === 'hls') && o.file) {
@@ -1915,7 +2111,7 @@ async function handle(req, res){
           delete o.epv;
           o.file = 'http://127.0.0.1:' + LIVE_PORT + '/ep?vid=' + encodeURIComponent(epVid) + '&url=' + encodeURIComponent(o.file);
           o.native = true;
-        } else if (/surrit\.com|tapecontent\.net/i.test(o.file)) { o.native = true; }
+        } else if (/tapecontent\.net/i.test(o.file)) { o.native = true; }
         else {
           /* A resolver can pin the exact upstream referer its CDN expects
              (Vidara/PixelDrain/StreamTape); otherwise the source page origin
@@ -2052,10 +2248,12 @@ async function handle(req, res){
       return emit({ ok: false, error: 'eporner-session', page: targetUrl });
     }
 
-    /* 2b-bis. MissAV video pages: unpack the eval blob for the surrit HLS. */
-    if (/^(?:www\.)?missav[a-z0-9.]*$/i.test(epHost) && html) {
-      const mv = missavStream(html);
-      if (mv) return emit({ type: 'hls', file: mv, source: 'missav' });
+    /* 2b-jav. 123av video pages: the plyr embed's /stream endpoint carries the
+       signed HLS media. Resolved here so JAV plays in the app's own surface. */
+    if (/^(?:www\.)?123av\.com$/i.test(epHost) && html) {
+      const jv = await javStream(html);
+      if (jv) return emit(jv);
+      return emit({ ok: false, error: 'jav-session', page: targetUrl });
     }
 
     /* 2b-ter. Huangguo AI Video: the page carries the first episode as a
@@ -2184,7 +2382,6 @@ async function handle(req, res){
     const hh = new URL(url).hostname;
     if (/(^|\.)huangguo(?:drama)?\.(?:ai|com|chat)$/i.test(hh)) autoRef = 'https://huangguodrama.ai/';
     else if (/(^|\.)googlevideo\.com$/i.test(hh)) autoRef = 'https://www.youtube.com/';
-    else if (/(^|\.)fourhoi\.com$/i.test(hh)) autoRef = 'https://missav.ws/';
   } catch (e) {}
   try {
     if (path === '/img'){

@@ -252,6 +252,15 @@ html, body {
   font: 600 13px system-ui;
 }
 .pmsg button.primary { border: 0; background: var(--accent); font-weight: 700; }
+/* Explicit episode menu: a scrollable grid of episode buttons, so a series
+   (even a one-episode one) always has a clickable entry - never an autoplay. */
+.pmsg .picklist {
+  display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
+  max-width: min(760px, 92%); max-height: 46vh; overflow-y: auto; padding: 4px;
+}
+.pmsg .pickbtn { padding: 8px 14px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line); background: #17171f; color: #eee; font: 600 12.5px system-ui; }
+.pmsg .pickbtn:hover { border-color: var(--accent); color: #fff; }
 
 /* Bottom player controls: an overlay layer with the absolute maximum
    z-index, sibling of .pframe (never a child), so no media element or

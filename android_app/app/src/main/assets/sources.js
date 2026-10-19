@@ -187,8 +187,6 @@
     ]
   };
 
-  var MISSAV_HOSTS = ['https://missav.ws','https://missav.ai','https://missav123.com','https://missav.tv'];
-
   /* ---------------- THE 18+ VAULT ----------------
      Everything adult lives here - grouped by sub-page. The main sidebar has
      exactly ONE adult entry (18+); all of these categories render inside it. */
@@ -205,15 +203,20 @@
 
   var VAULT = {};
 
-  /* JAV - MissAV rows (native surrit extraction + isolated-page fallback). */
+  /* JAV - 123av rows (server-side SSR catalogue + native HLS extraction).
+     Every row here is one bounded backend fetch and plays through the app's
+     own player. */
   VAULT.jav = [];
-  function M(t, b, path) { VAULT.jav.push({ kind:'mv', t:t, path:path, badge:b }); }
-  M('JAV New Releases','JAV-NEW','/en/new');
-  M('JAV Uncensored Leak','LEAK','/en/uncensored-leak');
-  M('SIRO Amateur','SIRO','/en/siro');
-  M('LUXU Amateur','LUXU','/en/luxu');
-  M('FC2 PPV','FC2','/en/fc2');
-  M('Tokyo Hot','TH','/en/tokyohot');
+  function M(t, b, p) { VAULT.jav.push({ kind:'jav', t:t, p:p, badge:b }); }
+  M('JAV New Releases','JAV-NEW','new');
+  M('JAV Most Viewed','JAV-HOT','hot');
+  M('JAV Recently Added','JAV-REC','recent');
+  M('JAV Trending Today','JAV-TRD','today');
+  M('JAV This Week','JAV-WK','week');
+  M('JAV Top Rated','JAV-TOP','top');
+  M('JAV Uncensored','JAV-UNC','uncensored');
+  M('JAV Uncensored Leaked','LEAK','leaked');
+  M('FC2 PPV','FC2','fc2');
 
   /* Eporner - direct signed streams via the /xhr/video hash trick. */
   VAULT.eporner = [];
@@ -291,13 +294,13 @@
   R('Animated Futanari','R34-F','animated futanari');
   R('Animated Anal','R34-A','animated anal');
 
-  /* MMS - viral / desi / leaked rows + JAV mirrors. */
+  /* MMS - viral / desi / leaked rows + JAV mirrors (123av lane). */
   VAULT.mms = [];
-  function MM(t, b, p) { VAULT.mms.push({ kind:'mv', t:t, path:p, badge:b }); }
+  function MM(t, b, p) { VAULT.mms.push({ kind:'jav', t:t, p:p, badge:b }); }
   function MA(t, b, q, o) { VAULT.mms.push({ kind:'ep', t:t, q:q, order:o, badge:b }); }
-  MM('Latest JAV','JAV','/en/new');
-  MM('Uncensored Leak','LEAK','/en/uncensored-leak');
-  MM('FC2 PPV','FC2','/en/fc2');
+  MM('Latest JAV','JAV','new');
+  MM('Uncensored Leak','LEAK','leaked');
+  MM('FC2 PPV','FC2','fc2');
   MA('Viral MMS','MMS','mms','latest');
   MA('Indian Viral MMS','IN','indian mms','latest');
   MA('Desi Leaked','DESI','desi leaked','top-weekly');
@@ -471,7 +474,6 @@
     xmaalRows: xmaalRows,
     KAT: KAT,
     ANIMIX: ANIMIX,
-    MISSAV_HOSTS: MISSAV_HOSTS,
     VAULT: VAULT,
     VAULT_GROUPS: VAULT_GROUPS,
     YT_ROWS: YT_ROWS,
