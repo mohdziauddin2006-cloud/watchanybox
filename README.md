@@ -28,7 +28,7 @@ The same engine powers a **portable Windows desktop app** and a **native Android
 
 ---
 
-## ⬇️ Downloads
+## Downloads
 
 <p align="center">
   <a href="https://github.com/mohdziauddin2006-cloud/watchanybox/releases/download/v1.0.0/WatchAnyBox.exe">
@@ -83,7 +83,7 @@ The same engine powers a **portable Windows desktop app** and a **native Android
 
 ---
 
-## ✨ Core Features
+## Core Features
 
 | | Feature | What it does |
 |:--:|:--|:--|
@@ -98,7 +98,7 @@ The same engine powers a **portable Windows desktop app** and a **native Android
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 <p align="center"><sub>One shared extraction engine. Two native shells.</sub></p>
 
@@ -158,7 +158,7 @@ watchanybox/
 
 ---
 
-## 🔒 Privacy by Design
+## Privacy by Design
 
 - **Zero history, permanently.** Watch history, searches, resume points, and "continue watching" rows are never written. Legacy keys are purged on boot; only `wab.key` (optional TMDB key) and `wab.lang` (metadata language) persist.
 - **Local-first networking.** The UI and engine bind to loopback only — `127.0.0.1` on ports `46900–46903`. Nothing is exposed to your network.
@@ -169,7 +169,7 @@ watchanybox/
 
 ---
 
-## 🧑‍💻 Developer Quick-Start
+## Developer Quick-Start
 
 ### Prerequisites
 
