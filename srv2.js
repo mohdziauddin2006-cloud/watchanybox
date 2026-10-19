@@ -2291,12 +2291,17 @@ function start(i){
     } catch (e) { ALT_OK = false; }
   });
 }
-start(0);
+let START_ERROR = null;
+try { start(0); } catch (e) {
+  START_ERROR = e;
+  try { console.error('[srv2] listener start failed:', e && e.stack ? e.stack : e); } catch (_) {}
+}
 /* Hooks for the local verification harness (main.js ignores the value; a
    plain `true` would hide the internals the tests need to inspect). */
 module.exports = {
   EP_SESS, EP_STUB_RE, findEpisodeLinks, epornerSources, epIsStubResponse,
   epNormPath, epNumOf, epStem, normPageKey,
   findPartLinks, mergeLadders, partNumOfText, folderBase, partsCountOf,
-  LIVE_PORT: function () { return LIVE_PORT; }
+  LIVE_PORT: function () { return LIVE_PORT; },
+  START_ERROR: function () { return START_ERROR; }
 };

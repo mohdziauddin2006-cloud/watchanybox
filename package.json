@@ -6,11 +6,57 @@
   "main": "main.js",
   "author": "mohdziauddin2006-cloud",
   "license": "MIT",
+  "homepage": "https://github.com/mohdziauddin2006-cloud/watchanybox",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist:win": "electron-builder --win portable --x64"
   },
   "devDependencies": {
     "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
     "hls.js": "^1.7.3"
+  },
+  "build": {
+    "appId": "com.watchanybox.desktop",
+    "productName": "WatchAnyBox",
+    "copyright": "Copyright (c) 2026 mohdziauddin2006-cloud",
+    "asar": true,
+    "compression": "maximum",
+    "npmRebuild": false,
+    "publish": null,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "srv2.js",
+      "index.html",
+      "renderer.js",
+      "styles.css",
+      "sources.js",
+      "libraries.js",
+      "hls.min.js",
+      "package.json",
+      "LICENSE"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "WatchAnyBox.exe"
+    },
+    "portable": {
+      "requestExecutionLevel": "user",
+      "artifactName": "WatchAnyBox.exe"
+    }
   }
 }

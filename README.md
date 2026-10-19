@@ -46,15 +46,14 @@ The same engine powers a **portable Windows desktop app** and a **native Android
 
 | Platform | Artifact | Size | Direct download |
 |:--|:--|--:|:--|
-| 🪟 **Windows** | `WatchAnyBox.exe` — portable, no installer | 246.3 MB | [**Download EXE →**](https://github.com/mohdziauddin2006-cloud/watchanybox/releases/download/v1.0.0/WatchAnyBox.exe) |
+| 🪟 **Windows** | `WatchAnyBox.exe` — self-contained portable EXE, no installer | 95.7 MB | [**Download EXE →**](https://github.com/mohdziauddin2006-cloud/watchanybox/releases/download/v1.0.0/WatchAnyBox.exe) |
 | 🤖 **Android** | `WatchAnyBox.apk` — universal (arm64-v8a, armeabi-v7a, x86, x86_64) | 133.4 MB | [**Download APK →**](https://github.com/mohdziauddin2006-cloud/watchanybox/releases/download/v1.0.0/WatchAnyBox.apk) |
-| 🪟 **Windows** | `WatchAnyBox-Windows-x64.zip` — zipped portable bundle | 158.5 MB | [**Download ZIP →**](https://github.com/mohdziauddin2006-cloud/watchanybox/releases/download/v1.0.0/WatchAnyBox-Windows-x64.zip) |
 
 <details>
 <summary><strong>Windows — first launch</strong></summary>
 
-1. Download `WatchAnyBox.exe` (or the ZIP bundle).
-2. Run it — the app is portable and needs no installer.
+1. Download `WatchAnyBox.exe` — one self-contained file.
+2. Run it — the app is portable and needs no installer. The Electron runtime, local UI server, extraction engine, and all frontend assets are embedded in the EXE.
 3. If SmartScreen appears, choose **More info → Run anyway** (the build is unsigned).
 4. The UI is served locally from `http://127.0.0.1:46900`; the extraction engine binds `46901–46903`.
 
@@ -75,9 +74,8 @@ The same engine powers a **portable Windows desktop app** and a **native Android
 
 | Artifact | SHA-256 |
 |:--|:--|
-| `WatchAnyBox.exe` | `d56cc1b6a5b5d471f4fc0e32297a7e120849d7d508de50931c9306b25d7759eb` |
+| `WatchAnyBox.exe` | `5ddd2f8ea42b045600c807d26fa918989d6126f8db8f0a53ad74bb23a4f14885` |
 | `WatchAnyBox.apk` | `b83ef2a7ba38986b3a2a3efa528ccd11c3b466e8294e4ef89774684d63a0bfea` |
-| `WatchAnyBox-Windows-x64.zip` | `096c0827c237000f648c35ce754e871b413bab970456aac54ecbe407f3fa9dc2` |
 
 </details>
 

@@ -11,12 +11,82 @@
       top-level ad hijacks. will-navigate only ever allows 127.0.0.1/localhost.
    5. One BrowserWindow with an isolated preload bridge.
    The proxy backend (srv2.js) runs alongside on 46901-46903. */
-const { app, BrowserWindow, shell, ipcMain, session } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, session, dialog } = require('electron');
 const path = require('path');
-require(path.join(__dirname, 'srv2.js'));
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
+
+/* ---------------------------------------------------------------------------
+   CRASH / STARTUP INSTRUMENTATION
+   A packaged app has no visible terminal: anything thrown before the window
+   opens would look like "double-click did nothing". Every boot milestone and
+   every uncaught error is therefore written to a persistent log first, then
+   surfaced in a native error box. Logging itself can never throw.
+   --------------------------------------------------------------------------- */
+let LOG_FILE = '';
+function pickLogFile() {
+  const candidates = [];
+  try { candidates.push(path.join(app.getPath('userData'), 'watchanybox.log')); } catch (e) {}
+  try {
+    if (process.env.PORTABLE_EXECUTABLE_DIR) {
+      candidates.push(path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'WatchAnyBox.log'));
+    }
+  } catch (e) {}
+  try { candidates.push(path.join(path.dirname(process.execPath), 'WatchAnyBox.log')); } catch (e) {}
+  try { candidates.push(path.join(os.tmpdir(), 'WatchAnyBox.log')); } catch (e) {}
+  for (let i = 0; i < candidates.length; i++) {
+    try {
+      fs.mkdirSync(path.dirname(candidates[i]), { recursive: true });
+      fs.appendFileSync(candidates[i], '');
+      return candidates[i];
+    } catch (e) {}
+  }
+  return '';
+}
+LOG_FILE = pickLogFile();
+
+function logLine(level, message, err) {
+  let detail = '';
+  if (err) {
+    detail = ' :: ' + (err && err.stack ? err.stack : String(err));
+  }
+  const line = '[' + new Date().toISOString() + '] [' + level + '] ' + message + detail + '\n';
+  try { if (LOG_FILE) fs.appendFileSync(LOG_FILE, line); } catch (e) {}
+  try { process.stderr.write(line); } catch (e) {}
+}
+
+function showFatal(title, message, err) {
+  logLine('FATAL', message, err);
+  try {
+    const detail = err && err.stack ? err.stack : (err ? String(err) : '');
+    dialog.showErrorBox(
+      'WatchAnyBox - ' + title,
+      message + '\n\n' + detail + (LOG_FILE ? '\n\nLog file:\n' + LOG_FILE : '')
+    );
+  } catch (e) {}
+}
+
+process.on('uncaughtException', function (err) {
+  showFatal('Crash', 'The application hit an unrecoverable error.', err);
+});
+process.on('unhandledRejection', function (reason) {
+  logLine('ERROR', 'Unhandled promise rejection', reason);
+});
+
+app.on('child-process-gone', function (_event, details) {
+  try { logLine('ERROR', 'Child process gone: ' + JSON.stringify(details)); } catch (e) {}
+});
+app.on('render-process-gone', function (_event, _contents, details) {
+  try { logLine('ERROR', 'Renderer process gone: ' + JSON.stringify(details)); } catch (e) {}
+});
+app.on('gpu-process-crashed', function (_event, killed) {
+  logLine('ERROR', 'GPU process crashed (killed=' + killed + ')');
+});
+process.on('exit', function (code) { logLine('INFO', 'Process exit code ' + code); });
+
+logLine('INFO', 'Boot start | version=' + app.getVersion() + ' | electron=' + process.versions.electron +
+  ' | node=' + process.versions.node + ' | exe=' + process.execPath + ' | dir=' + __dirname);
 
 app.userAgentFallback =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -28,6 +98,21 @@ app.commandLine.appendSwitch('site-per-process');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
+
+/* ---------------------------------------------------------------------------
+   EMBEDDED PROXY SERVER (srv2.js)
+   It starts both HTTP listeners as a require side effect. A failure there must
+   never take the main process down before the UI has a chance to open, so the
+   load is isolated and reported instead of escaping to the top level.
+   --------------------------------------------------------------------------- */
+let proxyError = null;
+try {
+  require(path.join(__dirname, 'srv2.js'));
+  logLine('INFO', 'srv2.js loaded; proxy listeners requested on 46901-46903');
+} catch (err) {
+  proxyError = err;
+  logLine('ERROR', 'srv2.js failed to initialise', err);
+}
 
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
@@ -70,6 +155,11 @@ function startServer(port) {
       }
       let p = decodeURIComponent(req.url.split('?')[0]);
       if (p === '/') p = '/index.html';
+      if (p === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ ok: true, app: 'WatchAnyBox', pid: process.pid, port: port, versions: process.versions.electron }));
+        return;
+      }
       const file = path.join(__dirname, p);
       fs.readFile(file, function (err, data) {
         if (err) { res.writeHead(404); res.end('not found'); return; }
@@ -159,10 +249,11 @@ function cfSniff(details, why) {
   } catch (e) {}
 }
 
-function createWindow() {
+function createWindow(port) {
   win = new BrowserWindow({
     width: 1460, height: 920, minWidth: 1000, minHeight: 640,
     backgroundColor: '#08080c', autoHideMenuBar: true, title: 'Watch AnyBox',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true, nodeIntegration: false,
@@ -179,20 +270,45 @@ function createWindow() {
       backgroundThrottling: false, domStorageEnabled: true
     }
   });
-  win.loadURL('http://127.0.0.1:46900/index.html');
+  const appUrl = 'http://127.0.0.1:' + port + '/index.html';
+  logLine('INFO', 'Creating window for ' + appUrl);
+  win.once('ready-to-show', function () {
+    if (!win || win.isDestroyed()) return;
+    win.show();
+    logLine('INFO', 'Window ready-to-show; visible=' + win.isVisible());
+  });
+  win.loadURL(appUrl).catch(function (err) {
+    showFatal('UI failed to load', 'The local UI server did not answer at ' + appUrl, err);
+  });
   hardenContents(win.webContents);
+
+  win.webContents.on('did-finish-load', function () {
+    logLine('INFO', 'UI finished loading: ' + appUrl);
+  });
+  win.webContents.on('did-fail-load', function (_e, code, desc, failedUrl, isMainFrame) {
+    logLine('ERROR', 'did-fail-load code=' + code + ' desc=' + desc + ' url=' + failedUrl + ' main=' + isMainFrame);
+    if (isMainFrame) {
+      showFatal('UI failed to load',
+        'The window could not load ' + failedUrl + '\nError ' + code + ': ' + desc, null);
+    }
+  });
+  win.webContents.on('console-message', function (_e, level, message) {
+    if (level >= 2) logLine('RENDERER', String(message || '').slice(0, 2000));
+  });
+  win.on('closed', function () { logLine('INFO', 'Window closed'); win = null; });
 
   /* Self-heal: if the app's own renderer ever dies or wedges, reload it
      automatically instead of leaving a black unresponsive window. An
      embedded player frame dying is NOT the app renderer - probe liveness
      first so a dead iframe never interrupts the app. */
   let lastHeal = 0;
-  win.webContents.on('render-process-gone', function () {
+  win.webContents.on('render-process-gone', function (_e, details) {
+    logLine('ERROR', 'Renderer gone: ' + JSON.stringify(details || {}));
     const now = Date.now();
     if (now - lastHeal < 10000) return;
     lastHeal = now;
     setTimeout(function () {
-      if (win.isDestroyed()) return;
+      if (!win || win.isDestroyed()) return;
       Promise.race([
         win.webContents.executeJavaScript('1+1', true).catch(function () { throw new Error('dead'); }),
         new Promise(function (_z, rej) { setTimeout(function () { rej(new Error('wedged')); }, 4000); })
@@ -204,6 +320,15 @@ function createWindow() {
 }
 
 app.whenReady().then(function () {
+  try { app.setAppUserModelId('com.watchanybox.desktop'); } catch (e) {}
+  logLine('INFO', 'app ready');
+
+  if (proxyError) {
+    showFatal('Proxy engine failed',
+      'The embedded streaming engine (srv2.js) did not start. The UI will open, but playback will not work.',
+      proxyError);
+  }
+
   session.defaultSession.setPermissionRequestHandler(function (_wc, _perm, cb) { cb(true); });
 
   /* ONE listener (Electron keeps only the last attached per event). */
@@ -341,7 +466,16 @@ app.whenReady().then(function () {
   setTimeout(pushClearance, 9000);
   setInterval(pushClearance, 25000);
 
-  startServer(46900).then(createWindow).catch(function () {});
+  startServer(46900).then(function (port) {
+    logLine('INFO', 'Static UI server listening on 127.0.0.1:' + port);
+    createWindow(port);
+  }).catch(function (err) {
+    showFatal('Local server failed', 'Could not start the local UI server.', err);
+    app.quit();
+  });
+}).catch(function (err) {
+  showFatal('Startup failed', 'Electron could not finish its startup sequence.', err);
+  app.quit();
 });
 
 ipcMain.handle('open-external', function (_e, url) { return shell.openExternal(url); });
