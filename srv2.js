@@ -268,8 +268,84 @@ function findMedia(html, base){
    plain MP4 (JSON-LD contentUrl and the player's data-media-backup-src).
    Return that file directly - the full site (games, novels, ads, chrome)
    never enters a player frame. */
+/* The Huangguo video page ships its COMPLETE episode list inside the Next.js
+   flight payload ("episodeList":[{n,title,video}, ...]). Reading it is the only
+   way to guarantee the picker always starts at Episode 1 and includes every
+   AVAILABLE episode: the rendered grid omits the landing page (Episode 1) on
+   episode pages, and the page's own player only exposes the current file.
+   Returns null when the page carries no list at all; an array (possibly empty)
+   when it does - so a page whose episodes are all paid/locked can never fall
+   back to a trailer. Entries without a playable URL are dropped. */
+function hgEpisodes(html) {
+  const raw = String(html || '');
+  if (raw.indexOf('episodeList') < 0) return null;
+  let flight = '';
+  const re = /self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)/g;
+  let m;
+  while ((m = re.exec(raw))) {
+    try { flight += JSON.parse(m[1]); } catch (e) {}
+  }
+  if (!flight) return null;
+  const text = flight.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  const at = text.indexOf('"episodeList"');
+  if (at < 0) return null;
+  const start = text.indexOf('[', at);
+  if (start < 0) return null;
+  let depth = 0, inStr = false, esc = false, end = -1;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === '[') depth++;
+    else if (c === ']') { depth--; if (!depth) { end = i; break; } }
+  }
+  if (end < 0) return null;
+  let arr = null;
+  try { arr = JSON.parse(text.slice(start, end + 1)); } catch (e) { return null; }
+  if (!Array.isArray(arr)) return null;
+  const out = [], seen = {};
+  arr.forEach(function (x) {
+    if (!x) return;
+    const n = Number(x.n) || 0;
+    const url = absUrl(String(x.video || ''), 'https://huangguodrama.ai/');
+    if (!(n >= 1) || !url || !/^https?:/i.test(url) || !/\.(?:mp4|m3u8)(?:\?|#|$)/i.test(url)) return;
+    if (seen[n]) return;
+    seen[n] = 1;
+    const title = String(x.title || ('Episode ' + n))
+      .replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').slice(0, 180);
+    out.push({ n: n, s: 0, url: url, t: title, d: 1 });
+  });
+  out.sort(function (a, b) { return a.n - b.n; });
+  return out;
+}
+
 function hgResolve(html, pageUrl) {
+  /* A free, full-length AI drama page carries the whole episode list: use it
+     as the ladder (direct MP4 per episode) and start on the episode this page
+     represents - the landing page is Episode 1, '/ep-5/' resolves Episode 5. */
+  const listed = hgEpisodes(html);
+  if (listed) {
+    if (!listed.length) return null;
+    let cur = null;
+    try {
+      const pu = new URL(pageUrl);
+      cur = epNumOf(pu.pathname + pu.search);
+    } catch (e) {}
+    const pick = (cur && listed.filter(function (x) { return x.n === cur.n; })[0]) || listed[0];
+    listed.forEach(function (x) { x.cur = (x === pick) ? 1 : 0; });
+    return { type: 'direct', file: pick.url, source: 'huangguodrama', eps: listed };
+  }
   const t = String(html || '').replace(/\\\//g, '/').replace(/\\u002F/gi, '/');
+  /* The page carries an episode list but it produced no playable entry: this
+     is a paid/locked/showcase page. Never fall through to the page's promo
+     MP4 - a trailer is not an episode. */
+  if (String(html || '').indexOf('episodeList') >= 0) return null;
   const pool = [];
   const add = function (u) {
     const a = absUrl(u, pageUrl);
@@ -733,7 +809,13 @@ function javParse(html) {
     if (!t || t.length < 2) continue;
     const dur = javText((inner.match(/<span[^>]+class=["'][^"']*card__dur[^"']*["'][^>]*>([^<]+)</i) || [])[1] || '');
     seen.add(href);
-    out.push({ t: t.slice(0, 110), poster: im[1], page: JAV_BASE + href, dur: dur, kind: 'jav' });
+    out.push({
+      t: t.slice(0, 110), poster: im[1], page: JAV_BASE + href, dur: dur, kind: 'jav',
+      /* Every 123av video page is a one-part series: the universal picker
+         opens first and Episode 1 waits for an explicit click - it never
+         autoplays just because the payload currently lists one part. */
+      isSeries: true, type: 'tv', ep: 1, parts: 1
+    });
     if (out.length >= 40) break;
   }
   return out;
@@ -794,10 +876,39 @@ function javEmbedUrl(html) {
   } catch (e) {}
   return '';
 }
-async function javStream(html) {
-  const embed = javEmbedUrl(html);
-  if (!embed) return null;
-  const idm = embed.match(/\/e\/([a-z0-9_]+)/i);
+/* Every playable part the video page exposes. 123av currently ships exactly
+   one entry per page, but the payload is an array, so a future multi-part page
+   is read correctly too. Episode 1 is ALWAYS present: the video page itself is
+   the first part, even when its own player payload omits it. */
+function javPageEps(html, pageUrl) {
+  const out = [], seen = {};
+  const m = String(html || '').match(/player\(JSON\.parse\('([\s\S]*?)'\)/);
+  if (m) {
+    try {
+      const arr = JSON.parse(javJsString(m[1]));
+      (arr || []).forEach(function (e2, i) {
+        const raw = String((e2 && e2.url) || '');
+        const em = raw.match(/\/e\/([a-z0-9_]+)/i);
+        const n = Number(e2 && (e2.number || e2.n)) || (i + 1);
+        if (!em || n < 1 || n > 999 || seen[n]) return;
+        seen[n] = 1;
+        const host = (function () { try { return new URL(raw, pageUrl).origin; } catch (e) { return 'https://sadie-shop.site'; } })();
+        out.push({ n: n, s: 0, url: host + '/e/' + em[1], t: String((e2 && (e2.name || e2.title)) || ('Episode ' + n)).slice(0, 120), d: 0 });
+      });
+    } catch (e) {}
+  }
+  /* The page URL is the canonical Episode 1 link: its own /extract branch
+     resolves the signed HLS from the same player payload. */
+  if (String(html || '').length && pageUrl) {
+    if (!out.some(function (x) { return x.n === 1; })) {
+      out.unshift({ n: 1, s: 0, url: String(pageUrl), t: 'Episode 1', d: 0 });
+    }
+  }
+  out.sort(function (a, b) { return (a.s - b.s) || (a.n - b.n); });
+  return out.slice(0, 200);
+}
+async function javEmbedStream(embed) {
+  const idm = String(embed || '').match(/\/e\/([a-z0-9_]+)/i);
   if (!idm) return null;
   const r = await grab('https://sadie-shop.site/stream?id=' + idm[1], embed, undefined, undefined, 12000);
   const body = await r.text();
@@ -806,6 +917,9 @@ async function javStream(html) {
   const f = j && j.media && j.media.stream;
   if (!f || !/\.(?:m3u8|mp4)(?:[?#]|$)/i.test(f)) return null;
   return { type: /\.m3u8/i.test(f) ? 'hls' : 'direct', file: f, ref: 'https://sadie-shop.site/', source: '123av' };
+}
+async function javStream(html) {
+  return javEmbedStream(javEmbedUrl(html));
 }
 
 /* TMDB id resolution used only when a page exposes no stream at all (DRM
@@ -1353,7 +1467,7 @@ function normPageKey(u) {
    never mistaken for an episode. */
 const EP_MAX = 400;
 function findEpisodeLinks(html, pageUrl) {
-  const out = [], seen = {};
+  const out = [], seen = {}, baseSeen = {};
   let curHost = '', curPath = '', curQuery = '';
   try {
     const cu = new URL(pageUrl);
@@ -1390,9 +1504,28 @@ function findEpisodeLinks(html, pageUrl) {
     if (h2 !== curHost) continue;
     const full2 = p2 + q2;
     const num = epNumOf(full2);
-    if (!num || num.n < 1 || num.n > 9999) continue;
     const norm2 = epNormPath(full2);
-    if (norm2.indexOf('#') < 0) continue;
+    if (!num || num.n < 1 || num.n > 9999 || norm2.indexOf('#') < 0) {
+      /* Tokenless link: on an EPISODE page the show's landing page IS Episode 1
+         ("/video/123/" beside "/video/123/ep-5/", or "/show/" beside
+         "/show/?ep=5"). The rendered grids omit that link from the numbered
+         siblings, which is exactly how Episode 1 used to disappear. Collect the
+         closest parent and add it after the scan when no Episode 1 exists. */
+      if (curIsEp && curStem) {
+        const stem2 = epStem(norm2);
+        if (!stem2) continue;
+        const boundary = curStem.charAt(stem2.length);
+        const isParent = curStem.indexOf(stem2) === 0 &&
+          (boundary === '' || boundary === '/' || boundary === '-' || boundary === '_' || boundary === '.' || boundary === '?') &&
+          (curStem.length - stem2.length) <= 48;
+        const clean = String(a).replace(/#.*$/, '');
+        if (isParent && clean !== String(pageUrl).replace(/#.*$/, '')) {
+          const k2 = clean.toLowerCase().replace(/\/+$/, '');
+          if (!baseSeen[k2] || baseSeen[k2].stem < stem2.length) baseSeen[k2] = { url: a, stem: stem2.length };
+        }
+      }
+      continue;
+    }
     let ok = false;
     if (curIsEp) {
       ok = (norm2 === curNorm);
@@ -1411,6 +1544,20 @@ function findEpisodeLinks(html, pageUrl) {
      itself (many watch pages omit the self link) - without it the selector
      would open on the wrong episode. */
   if (curIsEp && curNum && curNum.n >= 1) add(pageUrl, curNum);
+  /* A non-tokenised series LANDING page that already links a numbered ladder
+     is Episode 1: the grids commonly list '/<show>-2/', '/<show>-3/' ... but
+     omit the show root itself. Without this the selector started at Episode 2
+     and Episode 1 could not be reached. */
+  if (!curIsEp && curStem && out.length && !out.some(function (x) { return x.n === 1; })) {
+    add(pageUrl, { s: 0, n: 1 });
+  }
+  /* Episode 1 is never optional: a ladder that lacks it while the page links
+     its show root gets the root as Episode 1 (the landing page plays it). */
+  if (curIsEp && !out.some(function (x) { return x.n === 1; })) {
+    const cands = Object.keys(baseSeen).map(function (k) { return baseSeen[k]; })
+      .sort(function (a, b) { return b.stem - a.stem; });
+    if (cands.length) add(cands[0].url, { s: 0, n: 1 });
+  }
   out.sort(function (x, y) { return (x.s - y.s) || (x.n - y.n); });
   return out.slice(0, EP_MAX);
 }
@@ -1675,6 +1822,8 @@ function mergeLadders(primary, secondary) {
 /* Full season/episode map for a TMDB show: /eps?tmdb=<id>. Every season and
    every episode in ONE payload - no per-episode round trips while browsing. */
 const EPS_CACHE = new Map();
+const AI_EPS_CACHE = new Map();
+const JAV_EPS_CACHE = new Map();
 async function tmdbEpisodes(id) {
   const key = String(id);
   const hit = EPS_CACHE.get(key);
@@ -1783,8 +1932,9 @@ function cookFor(host) {
 }
 
 async function grab(url, referer, range, ua, ms){
+  const budget = ms || 12000;
   const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), ms || 12000);
+  const t = setTimeout(() => ctl.abort(), budget);
   const h = {
     'User-Agent': ua || UA,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -1801,8 +1951,43 @@ async function grab(url, referer, range, ua, ms){
     if (ck) h['Cookie'] = ck;
   } catch (e) {}
   if (range) h.Range = range;
-  const r = await fetch(url, { headers: h, redirect: 'follow', signal: ctl.signal });
+  let r;
+  try {
+    r = await fetch(url, { headers: h, redirect: 'follow', signal: ctl.signal });
+  } catch (e) { clearTimeout(t); throw e; }
   clearTimeout(t);
+  /* A server can answer the headers and then stall the body forever. Keep
+     every buffered read inside its own hard budget: on timeout the stream is
+     cancelled so the fetch cannot pin the process, and the caller sees a
+     clean rejection instead of an infinite "Loading..." row. Streaming
+     consumers (/raw, /img) keep using r.body directly and are unaffected. */
+  const body = r.body;
+  if (body) {
+    const budget2 = Math.max(4000, budget);
+    const wrap = function (orig) {
+      return function () {
+        return new Promise(function (resolve, reject) {
+          let done = false;
+          const bt = setTimeout(function () {
+            if (done) return;
+            done = true;
+            try { body.cancel(); } catch (e) {}
+            reject(new Error('body timeout'));
+          }, budget2);
+          orig.call(r).then(function (v) {
+            if (done) return;
+            done = true; clearTimeout(bt); resolve(v);
+          }, function (e) {
+            if (done) return;
+            done = true; clearTimeout(bt); reject(e);
+          });
+        });
+      };
+    };
+    r.text = wrap(r.text);
+    r.arrayBuffer = wrap(r.arrayBuffer);
+    r.json = wrap(r.json);
+  }
   return r;
 }
 
@@ -1870,7 +2055,7 @@ const CATALOG_PAGE_TTL = 10 * 60 * 1000;
 const catalogCache = new Map();
 function isCatalogPath(path) {
   return path === '/tmdb' || path.indexOf('/tmdb/') === 0 ||
-    path === '/eps' || path === '/r34' || path === '/jav' || path === '/page';
+    path === '/eps' || path === '/r34' || path === '/jav' || path === '/jav/eps' || path === '/ai/eps' || path === '/page';
 }
 function catalogTtl(path) {
   return path === '/page' ? CATALOG_PAGE_TTL : CATALOG_TTL;
@@ -1891,6 +2076,26 @@ function setCatalogCached(key, status, headers, body, ttl) {
     }
   }
   catalogCache.set(key, { time: Date.now(), ttl: ttl || CATALOG_TTL, status, headers, body });
+}
+
+/* Hard catalogue budget: a route must always answer, even when an upstream
+   promise never settles. The losing promise is left to finish harmlessly. */
+function within(ms, work, fallback) {
+  return new Promise(function (resolve) {
+    let done = false;
+    const timer = setTimeout(function () {
+      if (done) return;
+      done = true;
+      resolve(fallback);
+    }, ms);
+    Promise.resolve().then(work).then(function (v) {
+      if (done) return;
+      done = true; clearTimeout(timer); resolve(v);
+    }, function () {
+      if (done) return;
+      done = true; clearTimeout(timer); resolve(fallback);
+    });
+  });
 }
 
 async function handle(req, res){
@@ -1999,7 +2204,7 @@ async function handle(req, res){
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     if (!id) return res.end('{"ok":false,"seasons":[]}');
     try {
-      const v = await tmdbEpisodes(id);
+      const v = await within(20000, function () { return tmdbEpisodes(id); }, null);
       const body = JSON.stringify(v || { ok: false, seasons: [] });
       if (v && v.ok !== false) {
         setCatalogCached(req.url, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, body, CATALOG_TTL);
@@ -2010,19 +2215,83 @@ async function handle(req, res){
     }
   }
 
+  /* Huangguo AI-drama episode map: the video page's flight payload lists every
+     AVAILABLE episode with its direct MP4. The picker reads this BEFORE any
+     playback, so Episode 1 and every later episode are on screen while the
+     universal "series never autoplay" rule is enforced. */
+  if (path === '/ai/eps') {
+    const pg = u.searchParams.get('url') || '';
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    if (!/^https?:\/\//i.test(pg)) return res.end('{"ok":false,"episodes":[]}');
+    const hit = AI_EPS_CACHE.get(pg);
+    if (hit && Date.now() - hit.t < 600000) return res.end(hit.body);
+    const out = await within(18000, async function () {
+      const r = await grab(pg, undefined, undefined, undefined, 15000);
+      const html = r && r.ok ? await r.text() : '';
+      const eps = (hgEpisodes(html) || []).map(function (x) {
+        return { ep: x.n, title: x.t, url: x.url, direct: true };
+      });
+      return { ok: eps.length > 0, episodes: eps };
+    }, { ok: false, episodes: [] });
+    try {
+      const body = JSON.stringify(out);
+      if (out && out.episodes && out.episodes.length) {
+        AI_EPS_CACHE.set(pg, { t: Date.now(), body: body });
+        setCatalogCached(req.url, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, body, CATALOG_TTL);
+        if (AI_EPS_CACHE.size > 60) {
+          const now = Date.now();
+          for (const [k, v] of AI_EPS_CACHE) { if (now - v.t > 600000) AI_EPS_CACHE.delete(k); }
+        }
+      }
+      return res.end(body);
+    } catch (e) { return res.end('{"ok":false,"episodes":[]}'); }
+  }
+
   /* JAV catalogue feed (123av SSR rows / search). Answers in ONE bounded
      upstream fetch, so the 18+ JAV rows can never sit on "Loading..." again;
      the JSON is catalogue-cached for the vault's revisit window. */
   if (path === '/jav') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    const items = await within(16000, function () {
+      return javFeed(u.searchParams.get('row') || 'new', u.searchParams.get('q') || '');
+    }, []);
     try {
-      const items = await javFeed(u.searchParams.get('row') || 'new', u.searchParams.get('q') || '');
-      const body = JSON.stringify({ ok: true, items: items });
-      setCatalogCached(req.url, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, body, items.length ? CATALOG_TTL : 60 * 1000);
+      const body = JSON.stringify({ ok: Array.isArray(items), items: items || [] });
+      setCatalogCached(req.url, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, body, items && items.length ? CATALOG_TTL : 60 * 1000);
       return res.end(body);
     } catch (e) {
       return res.end('{"ok":false,"items":[]}');
     }
+  }
+
+  /* JAV episode map: 123av's player payload, plus the guaranteed Episode 1
+     (the video page itself). The picker reads this BEFORE playback, so even a
+     one-part JAV video waits for an explicit episode click. */
+  if (path === '/jav/eps') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    const pg = u.searchParams.get('url') || '';
+    if (!/^https?:\/\/(?:www\.)?123av\.com\/en\/v\//i.test(pg)) return res.end('{"ok":false,"episodes":[]}');
+    const hit = JAV_EPS_CACHE.get(pg);
+    if (hit && Date.now() - hit.t < 600000) return res.end(hit.body);
+    const out = await within(14000, async function () {
+      const r = await grab(pg, JAV_BASE + '/', undefined, undefined, 12000);
+      const html = r && r.ok ? await r.text() : '';
+      if (!html) return { ok: false, episodes: [] };
+      const eps = javPageEps(html, pg).map(function (x) {
+        return { ep: x.n, title: x.t || ('Episode ' + x.n), url: x.url, direct: false };
+      });
+      return { ok: eps.length > 0, episodes: eps };
+    }, { ok: false, episodes: [] });
+    const body = JSON.stringify(out);
+    if (out && out.episodes && out.episodes.length) {
+      JAV_EPS_CACHE.set(pg, { t: Date.now(), body: body });
+      setCatalogCached(req.url, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, body, CATALOG_TTL);
+      if (JAV_EPS_CACHE.size > 60) {
+        const now = Date.now();
+        for (const [k, v] of JAV_EPS_CACHE) { if (now - v.t > 600000) JAV_EPS_CACHE.delete(k); }
+      }
+    }
+    return res.end(body);
   }
 
   /* Rule34 post feed (server-side, strictly deduped by post id / normalized
@@ -2030,8 +2299,10 @@ async function handle(req, res){
   if (path === '/r34') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     try {
-      const feed = await r34Feed(u.searchParams.get('tags') || 'animated');
-      const body = JSON.stringify(feed);
+      const feed = await within(15000, function () {
+        return r34Feed(u.searchParams.get('tags') || 'animated');
+      }, { ok: false, posts: [] });
+      const body = JSON.stringify(feed || { ok: false, posts: [] });
       if (feed && feed.ok && feed.posts && feed.posts.length) {
         setCatalogCached(req.url, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, body, CATALOG_PAGE_TTL);
       }
@@ -2131,7 +2402,7 @@ async function handle(req, res){
         o.eps = o.eps
           .filter(function (x) { return x && /^https?:/i.test(String(x.url || '')); })
           .slice(0, 200)
-          .map(function (x) { return { n: Number(x.n) || 0, s: Number(x.s) || 0, url: String(x.url), t: String(x.t || ''), d: x.d ? 1 : 0 }; });
+          .map(function (x) { return { n: Number(x.n) || 0, s: Number(x.s) || 0, url: String(x.url), t: String(x.t || ''), d: x.d ? 1 : 0, cur: x.cur ? 1 : 0 }; });
         if (o.eps.length < 2) delete o.eps;
       } else { delete o.eps; }
       /* A page whose strip answered only as a single "next" link (no full
@@ -2175,6 +2446,14 @@ async function handle(req, res){
     /* 1. targetUrl is already a direct media stream */
     if (/\.(mp4|webm|m4v)(\?|#|$)/i.test(targetUrl)) return emit({ type: 'direct', file: targetUrl });
     if (/\.m3u8(\?|#|$)/i.test(targetUrl)) return emit({ type: 'hls', file: targetUrl });
+
+    /* 1a-jav. A 123av player part URL (sadie-shop.site/e/<id>) resolves
+       straight to the signed HLS: no page scrape needed. */
+    if (/^https?:\/\/(?:[\w-]+\.)*sadie-shop\.site\/e\/[a-z0-9_]+/i.test(targetUrl)) {
+      const jv = await javEmbedStream(targetUrl);
+      if (jv) return emit(jv);
+      return emit({ ok: false, error: 'jav-session', page: targetUrl });
+    }
 
     /* 1b. Dailymotion watch pages map straight to the bare embed player. */
     const mDm = targetUrl.match(/dailymotion\.com\/(?:embed\/)?video\/([a-zA-Z0-9]+)/i);
@@ -2256,12 +2535,15 @@ async function handle(req, res){
       return emit({ ok: false, error: 'jav-session', page: targetUrl });
     }
 
-    /* 2b-ter. Huangguo AI Video: the page carries the first episode as a
-       direct MP4. Play the file itself; the site's Next.js shell is never
-       rendered inside the app. */
+    /* 2b-ter. Huangguo AI Video: the page embeds its COMPLETE free episode
+       list (number + direct MP4). The ladder is handed to the player with the
+       requested episode already selected; when the list exists but has no
+       playable episode the page is a paywall and is reported as unavailable -
+       a trailer is never substituted. */
     if (/^(?:www\.)?huangguodrama\.(?:ai|com)$/i.test(epHost)) {
       const hg = hgResolve(html, targetUrl);
-      if (hg) { if (pageEps.length > 1) hg.eps = pageEps; return emit(hg); }
+      if (hg) return emit(hg);
+      return emit({ ok: false, error: 'ai-session', page: targetUrl });
     }
 
     /* 2c. KatMovieHD (fmovie theme): movie pages ship a `var Servers = {...}`
@@ -2504,11 +2786,22 @@ async function handle(req, res){
       return res.end(html);
     }
     if (path === '/page'){
-      const r = await grab(url, pRef || undefined, undefined, pUA || undefined);
-      const ctype = r.headers.get('content-type') || '';
-      let html = Buffer.from(await r.arrayBuffer()).toString('utf8');
+      const got = await within(16000, async function () {
+        const r = await grab(url, pRef || undefined, undefined, pUA || undefined);
+        return {
+          status: r.status,
+          ctype: r.headers.get('content-type') || '',
+          html: Buffer.from(await r.arrayBuffer()).toString('utf8')
+        };
+      }, null);
+      if (!got) {
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('PROXY_ERROR: timeout');
+      }
+      const ctype = got.ctype;
+      let html = got.html;
       /* Cloudflare challenge: never paint it - serve the black dead page. */
-      if (/text\/html|application\/xhtml/i.test(ctype) && isCfChallenge(r.status, html)) {
+      if (/text\/html|application\/xhtml/i.test(ctype) && isCfChallenge(got.status, html)) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         return res.end(CF_DEAD_PAGE);
       }
@@ -2517,7 +2810,7 @@ async function handle(req, res){
          to keep for the long TTL; these are list payloads, not stream URLs. */
       if (!/text\/html|application\/xhtml/i.test(ctype)) {
         const hdrs = { 'Content-Type': ctype || 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' };
-        if (r.status >= 200 && r.status < 300) {
+        if (got.status >= 200 && got.status < 300) {
           setCatalogCached(req.url, 200, hdrs, html, CATALOG_TTL);
         }
         res.writeHead(200, hdrs);
@@ -2538,7 +2831,7 @@ async function handle(req, res){
       const hdrs = {'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-cache'};
       /* Never cache hide=1 player pages: their inline tokens can expire.
          Ordinary catalog/list HTML is safe for 10 minutes. */
-      if (r.status >= 200 && r.status < 300 && u.searchParams.get('hide') !== '1') {
+      if (got.status >= 200 && got.status < 300 && u.searchParams.get('hide') !== '1') {
         setCatalogCached(req.url, 200, hdrs, html, CATALOG_PAGE_TTL);
       }
       res.writeHead(200, hdrs);
@@ -2581,7 +2874,7 @@ try { start(0); } catch (e) {
    plain `true` would hide the internals the tests need to inspect). */
 module.exports = {
   EP_SESS, EP_STUB_RE, findEpisodeLinks, epornerSources, epIsStubResponse,
-  epNormPath, epNumOf, epStem, normPageKey,
+  epNormPath, epNumOf, epStem, normPageKey, hgEpisodes, hgResolve,
   findPartLinks, mergeLadders, partNumOfText, folderBase, partsCountOf,
   LIVE_PORT: function () { return LIVE_PORT; },
   START_ERROR: function () { return START_ERROR; }

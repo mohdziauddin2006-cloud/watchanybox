@@ -48,8 +48,6 @@ object NodeBackend {
                 rt.getExecutor(wrapped).executeVoid()
                 started = true
                 lastError = null
-                val version = try { rt.getExecutor("process.version").executeString() } catch (_: Throwable) { "?" }
-                Log.i(TAG, "Node backend up ($version); srv2.js listening on 46901-46903")
 
                 while (!Thread.currentThread().isInterrupted) {
                     if (rt.isStopping) break

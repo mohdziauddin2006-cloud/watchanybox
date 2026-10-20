@@ -345,12 +345,12 @@
   var HG_FEED = 'https://huangguodrama.ai/api/home-feed/?locale=en';
   VAULT.ai = [
     { kind:'ai', t:'AI Video - Trending',       u:HG_FEED + '&sort=popular&offset=0', badge:'AI', pages:1 },
-    { kind:'ai', t:'AI Video - New Releases',   u:HG_FEED + '&sort=new&offset=0',     badge:'AI', pages:1 },
+    { kind:'ai', t:'AI Video - Contemporary',   u:HG_FEED + '&sort=all&offset=0',     badge:'AI', pages:3, genre:'Contemporary' },
     { kind:'ai', t:'AI Video - All Titles',     u:HG_FEED + '&sort=all&offset=0',     badge:'AI', pages:1 },
-    { kind:'ai', t:'AI Video - Romance',        u:HG_FEED + '&sort=all&offset=0',     badge:'AI', pages:3, genre:'Romance' },
+    { kind:'ai', t:'AI Video - Romance',        u:HG_FEED + '&sort=all&offset=0',     badge:'AI', pages:3, genre:'Harem romance' },
     { kind:'ai', t:'AI Video - Fantasy',        u:HG_FEED + '&sort=all&offset=0',     badge:'AI', pages:3, genre:'Fantasy' },
     { kind:'ai', t:'AI Video - Urban Stories',  u:HG_FEED + '&sort=all&offset=0',     badge:'AI', pages:3, genre:'Urban stories' },
-    { kind:'ai', t:'AI Video - Action',         u:HG_FEED + '&sort=all&offset=0',     badge:'AI', pages:2, genre:'Action' }
+    { kind:'ai', t:'AI Video - Family Sagas',   u:HG_FEED + '&sort=all&offset=0',     badge:'AI', pages:3, genre:'Wealthy families' }
   ];
 
   /* ---------------- Tube rows (ad-free YouTube) ---------------- */

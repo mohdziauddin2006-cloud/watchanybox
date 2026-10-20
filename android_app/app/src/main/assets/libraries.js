@@ -73,13 +73,13 @@
     } catch (e) {}
     var ra = await withTimeout(fetch('https://api.allorigins.win/raw?url=' + enc(u), { cache: 'no-store' }), ms);
     if (!ra.ok) throw new Error('HTTP ' + ra.status);
-    return await ra.text();
+    return await withTimeout(ra.text(), ms);
   }
 
   async function fetchJSON(u, ms) {
     try {
       var rd = await withTimeout(fetch(u, { cache: 'no-store' }), ms || 12000);
-      if (rd && rd.ok) { var t = await rd.text(); if (t && t.trim().charAt(0) !== '<') return JSON.parse(t); }
+      if (rd && rd.ok) { var t = await withTimeout(rd.text(), ms || 12000); if (t && t.trim().charAt(0) !== '<') return JSON.parse(t); }
     } catch (e) {}
     var tx = await fetchText(u, ms || 12000);
     return JSON.parse(tx);
@@ -312,9 +312,26 @@
       if (tnum && tnum.n >= 1 && sibling(norm2, p2)) { add(seenA, anchors, a, tnum, title, 0); continue; }
       /* (E) the show's own page: same slug, no number token anywhere - that
          link IS the first part on these series index pages ('/<slug>/' plays
-         episode 1). Recorded, adopted only when no numbered part 1 exists. */
-      if (!curIsEp && curLeaf.length >= 3 && leafOf(p2) === curLeaf && p2.replace(/\/+$/, '').toLowerCase() !== curPathKey) {
-        slugLinks.push({ url: a, t: title });
+         episode 1). On an EPISODE page the same evidence is the show ROOT
+         ("/<slug>/" beside "/<slug>/?ep=2", or "/video/1/" beside
+         "/video/1/ep-2/"): Episode 1 was being lost exactly there. Longest
+         parent wins below, so a logo/category link can never claim the slot. */
+      var selfKey = String(a).replace(/#.*$/, '').toLowerCase();
+      var curKey = String(pageUrl).replace(/#.*$/, '').toLowerCase();
+      var parentLink = false, stemLen = 0;
+      if (curIsEp && curStem) {
+        var stem2b = ladderStem(norm2);
+        var bch = curStem.charAt(stem2b.length);
+        parentLink = !!stem2b && selfKey !== curKey &&
+          curStem.indexOf(stem2b) === 0 &&
+          (bch === '' || bch === '/' || bch === '-' || bch === '_' || bch === '.' || bch === '?') &&
+          (curStem.length - stem2b.length) <= 48 &&
+          leafOf(p2).length >= 3;
+        stemLen = stem2b.length;
+      }
+      if (parentLink ||
+          (!curIsEp && curLeaf.length >= 3 && leafOf(p2) === curLeaf && selfKey !== curKey)) {
+        slugLinks.push({ url: a, t: title, stem: stemLen || leafOf(p2).length });
         continue;
       }
       /* (C) bare-number part in the page's own folder. */
@@ -356,9 +373,11 @@
     };
     if (anchors.length) {
       /* The show's own '/<slug>/' link IS episode 1 on these series indexes:
-         adopt it even when the page lists a single numbered part. */
+         adopt it even when the page lists a single numbered part. Only the
+         CLOSEST parent qualifies (a breadcrumb/logo link must never win). */
       if (slugLinks.length && !anchors.some(function (x) { return x.n === 1; })) {
-        slugLinks.forEach(function (s3) { add(seenA, anchors, s3.url, { s: 0, n: 1 }, s3.t, 0); });
+        slugLinks.sort(function (x, y) { return (y.stem || 0) - (x.stem || 0); });
+        add(seenA, anchors, slugLinks[0].url, { s: 0, n: 1 }, slugLinks[0].t, 0);
       }
       if (anchors.length > 1) {
         if (curIsEp && curNum && curNum.n >= 1) add(seenA, anchors, pageUrl, curNum, '', 0);
@@ -766,8 +785,10 @@
         year: v.year || '',
         /* Series grouping data: every episode of one title shares `series`,
            and `ep` is its own number - the player's episode selector reads
-           these directly (titles alone can be ambiguous). */
-        series: t.slice(0, 110), ep: ep
+           these directly (titles alone can be ambiguous). An episodic card is
+           also a SERIES card, so it opens the picker instead of autoplaying. */
+        series: t.slice(0, 110), ep: ep,
+        isSeries: ep > 0 ? true : undefined, type: ep > 0 ? 'tv' : undefined
       });
     });
     return out.filter(function (it) { return !!it.page; });
@@ -822,6 +843,18 @@
     } catch (e) {}
     if (!out.length) { try { out = await epSearch('japanese ' + term); } catch (e) {} }
     return out.slice(0, 24);
+  }
+  /* Episode map for one JAV video page. The backend always includes Episode 1
+     (the page itself), so even a one-part video opens the picker with a real
+     entry instead of skipping straight into playback. */
+  async function javEpisodes(pageUrl) {
+    if (!pageUrl || !/^https?:\/\/(?:www\.)?123av\.com\/en\/v\//i.test(pageUrl)) return null;
+    try {
+      var B = await base();
+      var j = await fetchJSON(B + '/jav/eps?url=' + enc(pageUrl), 16000);
+      if (!j || !j.ok || !Array.isArray(j.episodes) || !j.episodes.length) return null;
+      return { title: '', episodes: j.episodes };
+    } catch (e) { return null; }
   }
 
   /* TMDB search through the local key-injecting proxy (adult vault only). */
@@ -905,11 +938,38 @@
     var out = [], seen = {};
     var want = String(genre || '').toLowerCase();
     (list || []).forEach(function (x) {
-      if (!x || (x.kind !== 'drama' && x.kind !== 'short')) return;
+      if (!x) return;
+      /* AI Video lists FULL, free dramas ONLY:
+         - 'short' entries are 33-second standalone trailers;
+         - story/album/game/comic/interactive/library entries are not videos;
+         - anything explicitly paid/locked/VIP/premium is never listed;
+         - a clip under two minutes is a preview, never a full episode. */
+      if (x.kind !== 'drama') return;
+      if (x.isPaid === true || x.paid === true || x.locked === true ||
+          x.vip === true || x.premium === true || Number(x.price) > 0 ||
+          x.free === false || x.isFree === false) return;
+      var epsN = Number(x.totalEpisodes) || 0;
+      /* A one-episode "drama" is a teaser/showcase page, not a series: its
+         page carries no free episode list and must never be listed as a
+         playable trailer. */
+      if (epsN < 2) return;
+      var durS = Number(x.durationSeconds) || 0;
+      if (durS > 0 && durS < 120) return;
       var href = String(x.href || '');
       if (!/^\/en\/video\/\d+\/?$/i.test(href)) return;
       var genres = Array.isArray(x.genres) ? x.genres : [];
-      if (want && !genres.some(function (g) { return String(g || '').toLowerCase() === want; })) return;
+      if (want) {
+        /* Genre labels on the feed are editorial ("Harem romance",
+           "Superpowers"): an exact match would blank the whole row. A
+           token/substring match keeps both sides useful without letting a
+           short genre name match unrelated prose. */
+        var hitGenre = genres.some(function (g) {
+          var gs = String(g || '').toLowerCase().trim();
+          if (!gs) return false;
+          return gs === want || gs.indexOf(want) >= 0 || (gs.length >= 4 && want.indexOf(gs) >= 0);
+        });
+        if (!hitGenre) return;
+      }
       var page = abs(href, HG + '/en/');
       if (!page || seen[page]) return;
       var title = decode(x.title || '').replace(/\s+/g, ' ').trim();
@@ -919,7 +979,10 @@
       seen[page] = 1;
       out.push({
         kind: 'ai', t: title, poster: cover, page: page, badge: 'AI',
-        dur: x.totalEpisodes ? (x.totalEpisodes + ' EP') : '',
+        /* Every AI drama is a SERIES: the universal picker opens first and no
+           episode ever autoplays; Episode 1 is listed like any other. */
+        isSeries: true, parts: epsN,
+        dur: epsN + ' EP',
         year: String(x.publishedAt || '').slice(0, 4),
         desc: String(x.description || '').slice(0, 240),
         genres: genres
@@ -960,6 +1023,18 @@
       var hay = [it.t, it.desc, (it.genres || []).join(' ')].join(' ').toLowerCase();
       return words.every(function (w) { return hay.indexOf(w) >= 0; });
     }).slice(0, 36);
+  }
+  /* Full episode map for an AI drama, read from the page's embedded list. The
+     picker calls this BEFORE playback so Episode 1 (and every available
+     episode) is on screen without starting a stream. */
+  async function aiEpisodes(pageUrl) {
+    if (!pageUrl) return null;
+    try {
+      var B = await base();
+      var j = await fetchJSON(B + '/ai/eps?url=' + enc(pageUrl), 17000);
+      if (!j || !j.ok || !Array.isArray(j.episodes) || j.episodes.length < 2) return null;
+      return { title: '', episodes: j.episodes };
+    } catch (e) { return null; }
   }
 
   /* ---------------- Tube (ad-free YouTube) ---------------- */
@@ -1129,6 +1204,7 @@
   SC.hdSearch = hdSearch;
   SC.aiRow = aiRow;
   SC.aiSearch = aiSearch;
+  SC.aiEpisodes = aiEpisodes;
   SC.ytRow = ytRow;
   SC.ytSearch = ytSearch;
   SC.ytStream = ytStream;
@@ -1140,6 +1216,7 @@
   SC.r34vRow = r34vRow;
   SC.javRow = javRow;
   SC.javSearch = javSearch;
+  SC.javEpisodes = javEpisodes;
   SC.hcRow = hcRow;
   SC.hcSearch = hcSearch;
   SC.htvRow = htvRow;

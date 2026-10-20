@@ -126,7 +126,7 @@
   async function fetchJSON(u, ms) {
     var r = await withTimeout(fetch(u, { cache: 'no-store' }), ms || 12000);
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    return await r.json();
+    return await withTimeout(r.json(), ms || 12000);
   }
 
   /* TMDB: user key -> direct; otherwise the local proxy injects the baked key. */
@@ -327,6 +327,11 @@
      and annotated with the ladder, so the player's Season/Episode selector and
      Prev Ep / Next Ep work exactly as they do for backend ladders. */
   var EP_TAIL_RE = /(?:^|[\s\-–—_:·|.\[(])(?:(?:s(?:eason)?\s*(\d{1,2}))\s*[._-]?\s*)?(?:e|ep|episode|part|pt|vol|volume|chapter|chap)\s*\.?\s*(\d{1,3})(?:\s*[\])\]]?)\s*$/i;
+  /* The same token ANYWHERE in the title ("Psychedelic Love EP2 ..." carries
+     the site suffix after it). Used only to group cards from ONE row, so two
+     explicit episodes of the same show list together instead of each looking
+     like a lone "Episode 1". */
+  var EP_ANY_RE = /(?:^|[\s\-–—_:·|.\[(])(?:(?:s(?:eason)?\s*(\d{1,2}))\s*[._-]?\s*)?(?:e|ep|episode|part|pt|vol|volume|chapter|chap)\s*\.?\s*(\d{1,3})(?=$|[\s\-–—_:·|.)\]])/i;
   var GROUPABLE_KIND = /^(xs|kat|kd|hd|anx|mv|hc|htv|ai)$/;
   function seriesKeyOf(it) {
     var s = String((it && it.series) || '').trim();
@@ -338,6 +343,11 @@
       var base = t.slice(0, m.index).replace(/[\s\-–—_:·|.\[(]+$/, '').trim();
       if (base.length >= 2) return { key: 't:' + base.toLowerCase().replace(/\s+/g, ' '), ep: Number(m[2]) || 0, base: base };
     }
+    var m2 = t.match(EP_ANY_RE);
+    if (m2) {
+      var base2 = t.slice(0, m2.index).replace(/[\s\-–—_:·|.\[(]+$/, '').trim();
+      if (base2.length >= 2) return { key: 't:' + base2.toLowerCase().replace(/\s+/g, ' '), ep: Number(m2[2]) || 0, base: base2 };
+    }
     return null;
   }
   function attachEpisodeGroups(items) {
@@ -347,6 +357,10 @@
       if (!it || !GROUPABLE_KIND.test(String(it.kind || ''))) return;
       var info = seriesKeyOf(it);
       if (!info || !info.ep) return;
+      /* Keep the card's own episode number even when the row carries no
+         sibling (a lone "E03" card must not pretend to be Episode 1). */
+      it.ep = info.ep;
+      if (!it.series) it.series = info.base;
       it.__grp = info;
       (groups[info.key] = groups[info.key] || []).push(it);
     });
@@ -413,14 +427,23 @@
     if (wrap.__loaded) return;
     wrap.__loaded = true;
     var strip = wrap.__strip, row = wrap.__row;
+    var timer = 0;
     try {
-      var items = prepareItems(await loadRow(row));
+      /* No catalogue row may sit on "Loading..." forever: the backend already
+         bounds every upstream read, and this watchdog covers a mirror that
+         never settles at all. */
+      var guard = new Promise(function (_ok, bad) {
+        timer = setTimeout(function () { bad(new Error('row timeout')); }, 25000);
+      });
+      var items = prepareItems(await Promise.race([loadRow(row), guard]));
       strip.innerHTML = '';
       if (!items || !items.length) { strip.appendChild(el('div', 'empty', 'Nothing available right now.')); return; }
       items.slice(0, 40).forEach(function (it) { strip.appendChild(cardNode(it)); });
     } catch (e) {
       strip.innerHTML = '';
       strip.appendChild(el('div', 'empty', 'Nothing available right now.'));
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -902,6 +925,14 @@
     return 0;
   }
 
+  /* The extractor can mark the episode its page represents (the AI lane's
+     direct-MP4 ladder): the marker wins over URL matching, which can never
+     match a page URL to a direct file URL. */
+  function ladderStart(list, pageUrl) {
+    for (var i = 0; i < (list || []).length; i++) { if (list[i] && list[i].cur) return i; }
+    return ladderIdx(list, pageUrl);
+  }
+
   /* Does the card that is about to play belong to the ladder already on
      screen? Identity is the card group's key, with a URL-membership fallback
      for items that lost the annotation while jumping (base clones). A stream
@@ -964,7 +995,7 @@
       title: title || (g && g.title) || (it && it.t) || '',
       base: { t: it.t, kind: it.kind || '', poster: it.poster || '' },
       eps: ladder.slice(0, 200),
-      idx: ladderIdx(ladder, it.page || it.url)
+      idx: ladderStart(ladder, it.page || it.url)
     };
     paintSeriesControls();
     return true;
@@ -1000,13 +1031,13 @@
         var n = Number(e2 && e2.ep);
         return { n: n > 0 ? n : (i + 1), s: Number(e2 && e2.s) || 0,
                  url: String((e2 && e2.url) || ''), t: partLabel(e2 && e2.title),
-                 d: (e2 && e2.direct) ? 1 : 0 };
+                 d: (e2 && e2.direct) ? 1 : 0, cur: (e2 && e2.cur) ? 1 : 0 };
       });
     } else if (Array.isArray(eps) && eps.length) {
       src = eps.map(function (e2, i) {
         return { n: Number(e2 && e2.n) || (i + 1), s: Number(e2 && e2.s) || 0,
                  url: String((e2 && e2.url) || ''), t: partLabel(e2 && e2.t),
-                 d: (e2 && e2.d) ? 1 : 0 };
+                 d: (e2 && e2.d) ? 1 : 0, cur: (e2 && e2.cur) ? 1 : 0 };
       });
     }
     src.forEach(function (e2) {
@@ -1028,8 +1059,21 @@
     if (!list.length) {
       var pg0 = String(it.page || it.url || '');
       if (!pg0) return false;
-      list = [{ n: 1, s: 0, url: pg0, t: String(it.t || ''), d: isDirectUrl(pg0) ? 1 : 0 }];
+      var ep0 = Number(it.ep) || 1;
+      list = [{ n: ep0, s: 0, url: pg0, t: String(it.t || ''), d: isDirectUrl(pg0) ? 1 : 0 }];
       provisional = true;
+    }
+    /* A series catalogue card is normally its own landing page, which IS
+       Episode 1. When a scraped ladder starts at a later part (sites often
+       omit the landing link from the numbered grid), put Episode 1 back
+       instead of silently starting the show at Episode 2. An explicitly
+       picked episode (already on screen) is never rewritten. */
+    var base0 = String(it.page || it.url || '');
+    if ((!it.__picked || Number(it.__pickN) === 1) && list.length && isSeriesCard(it) && base0 && !list.some(function (x) { return Number(x.n) === 1; })) {
+      var baseKey0 = normPage(base0);
+      if (baseKey0 && !list.some(function (x) { return normPage(x.url) === baseKey0; })) {
+        list.unshift({ n: 1, s: 0, url: base0, t: '', d: isDirectUrl(base0) ? 1 : 0 });
+      }
     }
     var g0 = it.__grp;
     var b0 = { t: it.t, kind: it.kind || '', poster: it.poster || '', page: it.page || it.url || '' };
@@ -1042,7 +1086,7 @@
       title: (g0 && g0.title) || it.t || '',
       base: b0,
       eps: list.slice(0, 200),
-      idx: ladderIdx(list, it.page || it.url),
+      idx: ladderStart(list, it.page || it.url),
       provisional: !!provisional
     };
     paintSeriesControls();
@@ -1058,12 +1102,23 @@
     it.__partsRead = 1;
     var sRef = state.series;
     if (!sRef || sRef.mode !== 'page' || !sRef.provisional) return;
-    SC.xsEpisodes(pg, it.t).then(function (xe) {
+    var fetchParts = (it.kind === 'ai' && SC.aiEpisodes)
+      ? SC.aiEpisodes(pg)
+      : ((it.kind === 'jav' && SC.javEpisodes) ? SC.javEpisodes(pg) : SC.xsEpisodes(pg, it.t));
+    fetchParts.then(function (xe) {
       /* Only the ladder THIS card installed may be upgraded: the viewer may
          have switched shows (or episodes) while the fetch was in flight. */
       if (ep !== playEpoch || state.series !== sRef) return;
       var l2 = epsToLadder(xe && xe.episodes, null);
       if (l2.length < 2) return;
+      /* Same Episode 1 guarantee as setSeriesLadder(): a scraped parts grid
+         that starts at part 2 gets its series landing page back as part 1. */
+      if (isSeriesCard(it) && pg && !l2.some(function (x) { return Number(x.n) === 1; })) {
+        var pk2 = normPage(pg);
+        if (pk2 && !l2.some(function (x) { return normPage(x.url) === pk2; })) {
+          l2.unshift({ n: 1, s: 0, url: pg, t: '', d: isDirectUrl(pg) ? 1 : 0 });
+        }
+      }
       /* Never shrink a real ladder the extractor already installed. */
       if (!sRef.provisional && (sRef.eps || []).length >= l2.length) return;
       sRef.eps = l2;
@@ -1306,7 +1361,7 @@
     if (i < 0 || i >= list.length) return;
     s.idx = i;
     var step = list[i] || {};
-    var it = Object.assign({}, s.base || {}, { page: step.url, __picked: true });
+    var it = Object.assign({}, s.base || {}, { page: step.url, __picked: true, __pickN: Number(step.n) || 0 });
     stopVideo(); stopEmbed();
     paintSeriesControls();
     /* A part can be the media FILE itself (a page that holds every part as its
