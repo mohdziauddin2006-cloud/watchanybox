@@ -7,12 +7,14 @@
 <p><strong>One player. Every screen. Zero ads.</strong><br />
 A cross-platform, privacy-first streaming media center for Windows and Android — built on Electron, Jetpack Compose, and a shared embedded Node.js engine.</p>
 
-[![Latest release](https://img.shields.io/github/v/release/mohdziauddin2006-cloud/watchanybox?style=for-the-badge&label=release&color=EC4899&logo=github)](https://github.com/mohdziauddin2006-cloud/watchanybox/releases/latest)
-[![Total downloads](https://img.shields.io/github/downloads/mohdziauddin2006-cloud/watchanybox/total?style=for-the-badge&color=A855F7&logo=github)](https://github.com/mohdziauddin2006-cloud/watchanybox/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Android-3B82F6?style=for-the-badge&logo=windows11&logoColor=white)](#downloads)
-[![License](https://img.shields.io/badge/license-MIT-22C55E?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/mohdziauddin2006-cloud/watchanybox?style=for-the-badge&color=F59E0B&logo=github)](https://github.com/mohdziauddin2006-cloud/watchanybox)
-[![Last commit](https://img.shields.io/github/last-commit/mohdziauddin2006-cloud/watchanybox?style=for-the-badge&color=64748B&logo=git)](https://github.com/mohdziauddin2006-cloud/watchanybox/commits/main)
+<p><sub><samp><kbd><b>SIGNAL</b></kbd> &nbsp;·&nbsp; <b>ENGINE:</b> ONLINE &nbsp;·&nbsp; <b>TRACE:</b> ZERO &nbsp;·&nbsp; <b>ADS:</b> <span style="color: #FF0000;">TERMINATED ON SIGHT</span></samp></sub></p>
+
+[![Latest release](https://img.shields.io/github/v/release/mohdziauddin2006-cloud/watchanybox?style=for-the-badge&label=release&color=E10600&logo=github)](https://github.com/mohdziauddin2006-cloud/watchanybox/releases/latest)
+[![Total downloads](https://img.shields.io/github/downloads/mohdziauddin2006-cloud/watchanybox/total?style=for-the-badge&color=FF2A1A&logo=github)](https://github.com/mohdziauddin2006-cloud/watchanybox/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Android-7A0303?style=for-the-badge&logo=windows11&logoColor=white)](#downloads)
+[![License](https://img.shields.io/badge/license-MIT-8B0000?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/mohdziauddin2006-cloud/watchanybox?style=for-the-badge&color=B20710&logo=github)](https://github.com/mohdziauddin2006-cloud/watchanybox)
+[![Last commit](https://img.shields.io/github/last-commit/mohdziauddin2006-cloud/watchanybox?style=for-the-badge&color=7A0303&logo=git)](https://github.com/mohdziauddin2006-cloud/watchanybox/commits/main)
 
 [**Download**](#downloads) · [**Features**](#core-features) · [**Architecture**](#architecture) · [**Quick start**](#developer-quick-start) · [**Privacy**](#privacy-by-design)
 
@@ -20,23 +22,23 @@ A cross-platform, privacy-first streaming media center for Windows and Android �
 
 ---
 
-WatchAnyBox turns the messy business of streaming into one quiet, native surface. A local extraction engine resolves sources, the player mounts them inside the app, and a network-level shield removes ads, popups, and trackers before they load. Nothing you watch is ever written to disk.
+WatchAnyBox turns the messy business of streaming into one quiet, native surface. A local extraction engine resolves sources, the player mounts them inside the app, and a network-level shield removes ads, popups, and trackers before they load. Nothing you watch is <span style="color: #FF0000;">ever written to disk</span>.
 
 The same engine powers a **Windows desktop app** and a **native Android app** that adapts from phone to tablet to desktop-class windows. One catalogue, one player, one consistent experience — no browser handoff, no accounts, no telemetry.
 
-> **No ads. No history. No external browser.** Just the thing you came to watch.
+> <span style="color: #FF0000;">**No ads. No history. No external browser.**</span> Just the thing you came to watch.
 
 ---
 
-## Downloads
+## 01 // PROTOCOL: ACQUISITION
 
 <p align="center">
   <a href="https://github.com/mohdziauddin2006-cloud/watchanybox/releases/download/v1.0.0/WatchAnyBox-Setup-3.0.0.exe">
-    <img src="https://img.shields.io/badge/Download_for_Windows-EXE_%C2%B7_x64-EC4899?style=for-the-badge&amp;logo=windows11&amp;logoColor=white" alt="Download WatchAnyBox for Windows" />
+    <img src="https://img.shields.io/badge/Download_for_Windows-EXE_%C2%B7_x64-E10600?style=for-the-badge&amp;logo=windows11&amp;logoColor=white" alt="Download WatchAnyBox for Windows" />
   </a>
   &nbsp;&nbsp;
   <a href="https://github.com/mohdziauddin2006-cloud/watchanybox/releases/download/v1.0.0/WatchAnyBox.apk">
-    <img src="https://img.shields.io/badge/Download_for_Android-APK_%C2%B7_Universal-A855F7?style=for-the-badge&amp;logo=android&amp;logoColor=white" alt="Download WatchAnyBox for Android" />
+    <img src="https://img.shields.io/badge/Download_for_Android-APK_%C2%B7_Universal-7A0303?style=for-the-badge&amp;logo=android&amp;logoColor=white" alt="Download WatchAnyBox for Android" />
   </a>
 </p>
 
@@ -81,7 +83,7 @@ The same engine powers a **Windows desktop app** and a **native Android app** th
 
 ---
 
-## Core Features
+## 02 // CAPABILITY_REGISTRY
 
 | | Feature | What it does |
 |:--:|:--|:--|
@@ -96,7 +98,7 @@ The same engine powers a **Windows desktop app** and a **native Android app** th
 
 ---
 
-## Architecture
+## 03 // NETWORK_ARCHITECTURE
 
 <p align="center"><sub>One shared extraction engine. Two native shells.</sub></p>
 
@@ -156,9 +158,9 @@ watchanybox/
 
 ---
 
-## Privacy by Design
+## 04 // DIRECTIVE: ZERO-TRACE PROTOCOL
 
-- **Zero history, permanently.** Watch history, searches, resume points, and "continue watching" rows are never written. Legacy keys are purged on boot; only `wab.key` (optional TMDB key) and `wab.lang` (metadata language) persist.
+- **<span style="color: #FF0000;">Zero history, permanently.</span>** Watch history, searches, resume points, and "continue watching" rows are never written. Legacy keys are purged on boot; only `wab.key` (optional TMDB key) and `wab.lang` (metadata language) persist.
 - **Local-first networking.** The UI and engine bind to loopback only — `127.0.0.1` on ports `46900–46903`. Nothing is exposed to your network.
 - **No accounts, no telemetry, no analytics.** There is no sign-in, no device fingerprinting, and no usage reporting.
 - **Android backup disabled.** `allowBackup="false"` keeps app data out of cloud backups.
@@ -167,7 +169,7 @@ watchanybox/
 
 ---
 
-## Developer Quick-Start
+## 05 // DIRECTIVE: SPIN UP THE CORE
 
 ### Prerequisites
 
@@ -218,7 +220,7 @@ For a faster debug loop, use `.\gradlew.bat installDebug` (Windows) or `./gradle
 
 ---
 
-## 🤝 Contributing
+## 06 // SUBMISSIONS TO THE CORE
 
 Focused bug reports and pull requests are welcome. Please keep the project's core guarantees intact:
 
@@ -231,7 +233,7 @@ Open an issue with reproduction steps, platform, and app version. For larger cha
 
 ---
 
-## ⚖️ Legal & Content Notice
+## 07 // LEGAL DIRECTIVES
 
 WatchAnyBox **does not host, store, or distribute media**. It is a local player and proxy interface that resolves streams from third-party sources. All content is provided by those third parties, and users are responsible for accessing only material they are legally permitted to view in their jurisdiction.
 
@@ -239,7 +241,7 @@ The 18+ vault is intended strictly for adults of legal age. Nothing in this repo
 
 ---
 
-## 📄 License
+## 08 // LICENSE
 
 Released under the **MIT License**. See [LICENSE](LICENSE) for details.
 
@@ -247,7 +249,7 @@ Released under the **MIT License**. See [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-<sub>Built with ❤️ by <a href="https://github.com/mohdziauddin2006-cloud"><strong>mohdziauddin2006-cloud</strong></a></sub>
+<sub>Built with ❤️ by <a href="https://github.com/mohdziauddin2006-cloud"><strong>mohdziauddin2006-cloud</strong></a> — <kbd><span style="color: #FF0000;">THE ENGINE NEVER LEAVES YOUR MACHINE.</span></kbd></sub>
 
 <sub>If WatchAnyBox is useful to you, consider giving it a ⭐ — it helps others find the project.</sub>
 
