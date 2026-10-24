@@ -9,6 +9,10 @@ A cross-platform, privacy-first streaming media center for Windows and Android �
 
 <p><sub><samp><kbd><b>SIGNAL</b></kbd> &nbsp;·&nbsp; <b>ENGINE:</b> ONLINE &nbsp;·&nbsp; <b>TRACE:</b> ZERO &nbsp;·&nbsp; <b>ADS:</b> <span style="color: #FF0000;">TERMINATED ON SIGHT</span></samp></sub></p>
 
+```diff
+- HISTORY: NOT WRITTEN. TRACKERS: BLOCKED PRE-RENDER. ESCAPE ROUTES: NONE.
+```
+
 [![Latest release](https://img.shields.io/github/v/release/mohdziauddin2006-cloud/watchanybox?style=for-the-badge&label=release&color=E10600&logo=github)](https://github.com/mohdziauddin2006-cloud/watchanybox/releases/latest)
 [![Total downloads](https://img.shields.io/github/downloads/mohdziauddin2006-cloud/watchanybox/total?style=for-the-badge&color=FF2A1A&logo=github)](https://github.com/mohdziauddin2006-cloud/watchanybox/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Android-7A0303?style=for-the-badge&logo=windows11&logoColor=white)](#downloads)

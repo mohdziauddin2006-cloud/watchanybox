@@ -2,7 +2,7 @@
   "name": "watchanybox",
   "productName": "Watch AnyBox",
   "version": "3.0.0",
-  "description": "Watch AnyBox - clean native streaming build. Direct local playback, no server UI, no popups.",
+  "description": "WatchAnyBox - zero-ad native streaming core. Direct local playback through an embedded engine, no accounts, no telemetry, no trace. Electron + Jetpack Compose.",
   "main": "main.js",
   "author": "mohdziauddin2006-cloud",
   "license": "MIT",
